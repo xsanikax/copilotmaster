@@ -1,93 +1,97 @@
 package com.flippingcopilot.model;
 
-import com.google.gson.Gson;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import com.google.gson.annotations.SerializedName;
 import lombok.AllArgsConstructor;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
+import lombok.Data; // Ensure @Data is imported
+import lombok.Getter; // Explicitly import @Getter for clarity, though @Data includes it
+import lombok.NoArgsConstructor;
 import lombok.Setter;
-import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.GrandExchangeOfferState;
 
+import java.time.Instant;
+import java.util.Objects;
 
-@Getter
+@Data // This annotation should generate getters/setters/equals/hashCode
 @AllArgsConstructor
-@EqualsAndHashCode
+@NoArgsConstructor
+@Getter @Setter // Explicitly declare if @Data isn't enough, though usually it is.
 public class Offer {
-
-    @Setter
-    private OfferStatus status;
-
-    @SerializedName("item_id")
+    private String id; // This is the field getId() is for
+    private OfferStatus offerStatus;
     private int itemId;
-
     private int price;
-
-    @SerializedName("amount_total")
-    private int amountTotal;
-
-    @SerializedName("amount_spent")
-    private int amountSpent;
-
-    @SerializedName("amount_traded")
-    private int amountTraded;
-
-    @SerializedName("items_to_collect")
-    private int itemsToCollect;
-
-    @SerializedName("gp_to_collect")
-    private int gpToCollect;
-
-    @SerializedName("box_id")
-    private int boxId;
-
-    private boolean active;
-
-    @Setter
-    @SerializedName("copilot_price_used")
+    private int quantity;
+    private int slot;
     private boolean copilotPriceUsed;
+    private Instant time;
+    private int totalQuantity;
+    private boolean wasCopilotSuggestion;
+    private boolean acked;
 
-    public static Offer getEmptyOffer(int slotId) {
-        return new Offer(OfferStatus.EMPTY, 0, 0, 0, 0, 0, 0, 0, slotId, false, false);
+    // These fields are part of the update method, not direct constructor params
+    private String itemName;
+    private long spent;
+    private int collected;
+    private GrandExchangeOfferState state;
+
+
+    // If @Data or @Getter isn't generating it, uncomment this explicit getter:
+    // public String getId() {
+    //     return id;
+    // }
+
+    public boolean isAcked() {
+        return acked;
     }
 
+    public boolean isFreeSlot() {
+        return state == GrandExchangeOfferState.EMPTY || state == GrandExchangeOfferState.CANCELLED_BUY || state == GrandExchangeOfferState.CANCELLED_SELL;
+    }
 
-    public long cashStackGpValue() {
-        if (status == OfferStatus.SELL) {
-            return (long) (amountTotal - amountTraded) * price + gpToCollect;
-        } else if (status == OfferStatus.BUY){
-            // for a buy just take the full amount even if they have collected
-            // we assume they won't start selling any collected items until their buy offer is finished
-            return (long) amountTotal * price;
-        } else {
-            return 0;
+    public void update(
+            String itemName, int price, int quantity, long spent, int collected,
+            GrandExchangeOfferState state, Instant time, int totalQuantity,
+            boolean copilotPriceUsed, boolean wasCopilotSuggestion) {
+        this.itemName = itemName;
+        this.price = price;
+        this.quantity = quantity;
+        this.spent = spent;
+        this.collected = collected;
+        this.state = state;
+        this.time = time;
+        this.totalQuantity = totalQuantity;
+        this.copilotPriceUsed = copilotPriceUsed;
+        this.wasCopilotSuggestion = wasCopilotSuggestion;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
         }
+        if (obj == null || getClass() != obj.getClass()) {
+            return false;
+        }
+        Offer other = (Offer) obj;
+        return itemId == other.itemId &&
+                price == other.price &&
+                quantity == other.quantity &&
+                slot == other.slot &&
+                copilotPriceUsed == other.copilotPriceUsed &&
+                totalQuantity == other.totalQuantity &&
+                wasCopilotSuggestion == other.wasCopilotSuggestion &&
+                acked == other.acked &&
+                spent == other.spent &&
+                collected == other.collected &&
+                offerStatus == other.offerStatus && // Compare enums
+                state == other.state && // Compare enums
+                Objects.equals(id, other.id) && // Compare String IDs
+                Objects.equals(itemName, other.itemName) && // Compare String item names
+                Objects.equals(time, other.time); // Compare Instant timestamps
     }
 
-
-    public static Offer fromRunelite(GrandExchangeOffer runeliteOffer, int slotId) {
-        OfferStatus status = OfferStatus.fromRunelite(runeliteOffer.getState());
-        boolean active = runeliteOffer.getState().equals(GrandExchangeOfferState.BUYING)
-                || runeliteOffer.getState().equals(GrandExchangeOfferState.SELLING);
-        return new Offer(status,
-                runeliteOffer.getItemId(),
-                runeliteOffer.getPrice(),
-                runeliteOffer.getTotalQuantity(),
-                runeliteOffer.getSpent(),
-                runeliteOffer.getQuantitySold(),
-                0,
-                0,
-                slotId,
-                active,
-                false);
+    @Override
+    public int hashCode() {
+        return Objects.hash(id, offerStatus, itemId, itemName, price, quantity, slot, copilotPriceUsed, time, totalQuantity, wasCopilotSuggestion, acked, spent, collected, state);
     }
-
-
-    JsonObject toJson(Gson gson) {
-        JsonParser jsonParser = new JsonParser();
-        return jsonParser.parse(gson.toJson(this)).getAsJsonObject();
-    }
-
 }

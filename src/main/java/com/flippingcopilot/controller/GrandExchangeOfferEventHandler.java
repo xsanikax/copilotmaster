@@ -1,10 +1,10 @@
 package com.flippingcopilot.controller;
 
 import com.flippingcopilot.model.*;
-import com.flippingcopilot.ui.GpDropOverlay; // Keep this import if used elsewhere
+import com.flippingcopilot.ui.GpDropOverlay;
 import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.ConcurrentLinkedQueue; // Keep if used for transactionsToProcess
+import java.util.concurrent.ConcurrentLinkedQueue;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 
@@ -14,10 +14,13 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.GrandExchangeOfferState;
+import net.runelite.api.ItemComposition; // Import ItemComposition
 import net.runelite.api.events.GrandExchangeOfferChanged;
-import net.runelite.client.ui.overlay.OverlayManager; // Keep if used for GpDropOverlay
+import net.runelite.client.callback.ClientThread;
+import net.runelite.client.game.ItemManager; // Import ItemManager
+import net.runelite.client.ui.overlay.OverlayManager;
 
-import static com.flippingcopilot.model.OsrsLoginManager.GE_LOGIN_BURST_WINDOW; // Keep if used
+import static com.flippingcopilot.model.OsrsLoginManager.GE_LOGIN_BURST_WINDOW;
 
 @Slf4j
 @Singleton
@@ -34,6 +37,9 @@ public class GrandExchangeOfferEventHandler {
     private final GrandExchangeUncollectedManager grandExchangeUncollectedManager;
     private final OfferManager offerManager;
     private final SuggestionManager suggestionManager;
+    private final ItemManager itemManager; // Ensure ItemManager is injected here
+    private final ClientThread clientThread;
+
 
     // state
     private final Queue<Transaction> transactionsToProcess = new ConcurrentLinkedQueue<>();
@@ -80,7 +86,7 @@ public class GrandExchangeOfferEventHandler {
         Transaction t = inferTransaction(slot, o, prev, consistent);
         if(t != null) {
             transactionsToProcess.add(t);
-            processTransactions(); // FIX: Call processTransactions immediately to clear queue and send data
+            processTransactions();
             suggestionManager.setSuggestionNeeded(true);
             log.debug("inferred transaction {}", t);
         }
@@ -145,15 +151,9 @@ public class GrandExchangeOfferEventHandler {
         if(displayName != null) {
             Transaction transaction;
             while ((transaction = transactionsToProcess.poll()) != null) {
-                // FIX: Removed profit calculation here, now handled by backend handleProfitTracking
                 transactionManager.addTransaction(transaction, displayName);
-                // GpDropOverlay would need profit from somewhere if it's not calculated on client.
-                // Assuming it's based on some other value or is removed/re-evaluated.
-                // If it needs profit, you might need to adjust transactionManager.addTransaction to return it.
-                // For now, removing the GpDropOverlay line to get past compile issues if it's breaking.
-                // if (grandExchange.isHomeScreenOpen() && profit != 0) {
-                //     new GpDropOverlay(overlayManager, client, profit, transaction.getBoxId());
-                // }
+                // GpDropOverlay removed here to fix previous compile issues.
+                // Re-add if needed, ensuring it gets profit value.
             }
         }
     }
@@ -164,21 +164,25 @@ public class GrandExchangeOfferEventHandler {
         int quantityDiff = isNewOffer ? offer.getQuantitySold() : offer.getQuantitySold() - prev.getQuantitySold();
         int amountSpentDiff = isNewOffer ? offer.getSpent() : offer.getSpent() - prev.getSpent();
         if (quantityDiff > 0 && amountSpentDiff > 0) {
-            Transaction t = new Transaction();
-            // FIX: Use UUID.randomUUID().toString() because Transaction.id is now String
-            t.setId(UUID.randomUUID().toString()); // Line 163
-            t.setType(offer.getOfferStatus());
-            t.setItemId(offer.getItemId());
-            t.setPrice(offer.getPrice());
-            t.setQuantity(quantityDiff);
-            t.setBoxId(slot);
-            t.setAmountSpent(amountSpentDiff);
-            t.setTimestamp(Instant.now());
-            t.setCopilotPriceUsed(offer.isCopilotPriceUsed());
-            t.setWasCopilotSuggestion(offer.isWasCopilotSuggestion());
-            t.setOfferTotalQuantity(offer.getTotalQuantity());
-            t.setLogin(login);
-            t.setConsistent(consistent);
+            ItemComposition itemComposition = itemManager.getItemComposition(offer.getItemId()); // Get item name
+            String itemName = (itemComposition != null) ? itemComposition.getName() : "Unknown Item"; // Default if not found
+
+            Transaction t = new Transaction(
+                    offer.getId(),
+                    offer.getOfferStatus(),
+                    offer.getItemId(),
+                    itemName, // NEW: Set item name here
+                    offer.getPrice(),
+                    quantityDiff,
+                    slot,
+                    amountSpentDiff,
+                    Instant.now(),
+                    offer.isCopilotPriceUsed(),
+                    offer.isWasCopilotSuggestion(),
+                    offer.getTotalQuantity(),
+                    false, // login
+                    true // consistent
+            );
             return t;
         }
         return null;
