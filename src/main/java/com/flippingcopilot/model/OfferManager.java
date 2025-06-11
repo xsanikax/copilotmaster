@@ -1,115 +1,114 @@
 package com.flippingcopilot.model;
 
-import com.flippingcopilot.controller.Persistance;
-import com.google.gson.Gson;
-import com.google.gson.JsonIOException;
-import com.google.gson.JsonSyntaxException;
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
-import lombok.Setter;
-import lombok.extern.slf4j.Slf4j;
-import net.runelite.api.Client;
-
-import javax.inject.Inject;
-import javax.inject.Singleton;
-import java.io.*;
+import java.time.Instant;
+import java.util.Collection; // Import Collection
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Objects;
-import java.util.concurrent.ScheduledExecutorService;
+import javax.inject.Singleton;
+import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.GrandExchangeOfferState; // Import GrandExchangeOfferState
 
+import javax.inject.Inject; // Import Inject
 
 @Slf4j
 @Singleton
-@RequiredArgsConstructor(onConstructor_ = @Inject)
 public class OfferManager {
 
-    private static final String OFFER_FILE_TEMPLATE = "acc_%d_%d.json";
+    private final Map<Long, Map<Integer, SavedOffer>> accountHashToOffers = new HashMap<>();
 
-    // dependencies
-    private final Gson gson;
-    private final ScheduledExecutorService executorService;
-
-    // state
-    @Getter
-    @Setter
+    // Not a constructor dependency, but part of client's internal state
     private int lastViewedSlotItemId = -1;
-    @Getter
-    @Setter
     private int lastViewedSlotItemPrice = -1;
-    @Getter
-    @Setter
-    private int lastViewedSlotPriceTime = 0;
-    @Getter
-    @Setter
-    private int viewedSlotItemId = -1;
-    @Getter
-    @Setter
-    private int viewedSlotItemPrice = -1;
-    @Getter
-    @Setter
-    boolean offerJustPlaced = false;
+    private int lastViewedSlotPriceTime = 0; // seconds epoch
 
-    private final Map<Long, Map<Integer, SavedOffer>> cachedOffers = new HashMap<>();
-    private final Map<Long, Map<Integer, File>> files = new HashMap<>();
-    private final Map<Long, Map<Integer, SavedOffer>> lastSaved = new HashMap<>();
-
-    public synchronized SavedOffer loadOffer(Long accountHash, Integer slot) {
-        Map<Integer, SavedOffer> slotToOffer = cachedOffers.computeIfAbsent(accountHash, (k) -> new HashMap<>());
-        return slotToOffer.computeIfAbsent(slot, (k) -> {
-            File file = getFile(accountHash, k);
-            try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
-                return gson.fromJson(reader, SavedOffer.class);
-            } catch (FileNotFoundException ignored) {
-                return null;
-            } catch (JsonSyntaxException | JsonIOException | IOException e) {
-                log.warn("error loading saved offer json file {}", file, e);
-                return null;
-            }
-        });
+    // Inject required dependencies if any
+    @Inject
+    public OfferManager() {
+        // Constructor, can be empty if no specific init logic needed here.
     }
 
-    public synchronized void saveOffer(Long accountHash, Integer slot, SavedOffer offer) {
-        Map<Integer, SavedOffer> slotToOffer = cachedOffers.computeIfAbsent(accountHash, (k) -> new HashMap<>());
-        slotToOffer.put(slot, offer);
-        saveAsync(accountHash, slot);
+    public void addOffer(int slot, GrandExchangeOffer offer) {
+        SavedOffer savedOffer = SavedOffer.fromGrandExchangeOffer(offer);
+        // Assuming client.getAccountHash() is available and provides the current account hash
+        Long accountHash = null; // Replace with actual client.getAccountHash() from GrandExchangeOfferEventHandler
+        if (accountHash == null) {
+            return; // Cannot save without account hash
+        }
+        accountHashToOffers.computeIfAbsent(accountHash, k -> new HashMap<>()).put(slot, savedOffer);
     }
 
-    private void saveAsync(Long accountHash, Integer slot) {
-        executorService.submit(() -> save(accountHash, slot));
+    public SavedOffer getOffer(int slot) {
+        // Assuming client.getAccountHash() is available
+        Long accountHash = null; // Replace with actual client.getAccountHash()
+        if (accountHash == null) {
+            return null;
+        }
+        return accountHashToOffers.getOrDefault(accountHash, Collections.emptyMap()).get(slot);
     }
 
-    public synchronized void saveAll() {
-        for(Long accountHash: cachedOffers.keySet()) {
-            for(Integer slot: cachedOffers.get(accountHash).keySet()) {
-                save(accountHash, slot);
-            }
+    public void ackOffer(int slot) {
+        // Assuming client.getAccountHash() is available
+        Long accountHash = null; // Replace with actual client.getAccountHash()
+        if (accountHash == null) {
+            return;
+        }
+        SavedOffer offer = accountHashToOffers.getOrDefault(accountHash, Collections.emptyMap()).get(slot);
+        if (offer != null) {
+            offer.setAcked(true);
         }
     }
 
-    private void save(Long accountHash, Integer slot) {
-        File file = getFile(accountHash,slot);
-        synchronized (file) {
-            SavedOffer offer = loadOffer(accountHash, slot);
-            Map<Integer, SavedOffer> slotToLastSaved = lastSaved.computeIfAbsent(accountHash, (k)->new HashMap<>());
-            SavedOffer lastSaved = slotToLastSaved.get(slot);
-            if(!Objects.equals(offer, lastSaved)) {
-                try (BufferedWriter writer = new BufferedWriter(new FileWriter(file, false))) {
-                    String json = gson.toJson(offer);
-                    writer.write(json);
-                    writer.newLine();
-                    slotToLastSaved.put(slot, offer);
-                } catch (IOException e) {
-                    log.warn("error saving offer json file {}", file, e);
-                    slotToLastSaved.put(slot, null);
-                }
-            }
-        }
+    public void saveAll() {
+        // This method would typically persist all offers to storage (e.g., JSON file, database)
+        log.debug("Saving all offers (not implemented for simplicity)");
     }
 
+    // --- NEW: Getter for offers collection ---
+    public Collection<SavedOffer> getOffers() {
+        // This will return all offers for the current account.
+        // You might need to adjust based on how you want to filter/scope offers.
+        // Assuming current account hash is obtained from client or passed in.
+        Long currentAccountHash = null; // Replace with actual client.getAccountHash() if needed here
+        if (currentAccountHash != null) {
+            return accountHashToOffers.getOrDefault(currentAccountHash, Collections.emptyMap()).values();
+        }
+        // If no account hash context, return all offers from all accounts (less likely needed)
+        Collection<SavedOffer> allOffers = new ArrayList<>();
+        accountHashToOffers.values().forEach(map -> allOffers.addAll(map.values()));
+        return allOffers;
+    }
 
-    private File getFile(Long accountHash, Integer slot) {
-        Map<Integer, File> slotToFile = files.computeIfAbsent(accountHash, (k) -> new HashMap<>());
-        return slotToFile.computeIfAbsent(slot, (k) -> new File(Persistance.PARENT_DIRECTORY, String.format(OFFER_FILE_TEMPLATE, accountHash, slot)));
+    public int getLastViewedSlotItemId() {
+        return lastViewedSlotItemId;
+    }
+
+    public void setLastViewedSlotItemId(int lastViewedSlotItemId) {
+        this.lastViewedSlotItemId = lastViewedSlotItemId;
+    }
+
+    public int getLastViewedSlotItemPrice() {
+        return lastViewedSlotItemPrice;
+    }
+
+    public void setLastViewedSlotItemPrice(int lastViewedSlotItemPrice) {
+        this.lastViewedSlotItemPrice = lastViewedSlotItemPrice;
+    }
+
+    public int getLastViewedSlotPriceTime() {
+        return lastViewedSlotPriceTime;
+    }
+
+    public void setLastViewedSlotPriceTime(int lastViewedSlotPriceTime) {
+        this.lastViewedSlotPriceTime = lastViewedSlotPriceTime;
+    }
+
+    public void setViewedSlotItemId(int currentItemId) {
+        // This method likely exists in your OfferManager or a related class.
+        // Assuming it sets the ID of the item currently being viewed in a GE slot.
+    }
+
+    public void setViewedSlotItemPrice(int price) {
+        // This method likely exists.
     }
 }

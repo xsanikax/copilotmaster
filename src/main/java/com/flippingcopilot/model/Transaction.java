@@ -17,9 +17,10 @@ import java.util.UUID; // KEEP this import if you still use UUID.randomUUID() fo
 @Setter
 public class Transaction {
 
-    private String id; // FIX: Changed type from UUID to String
+    private String id;
     private OfferStatus type;
     private int itemId;
+    private String itemName; // NEW: Add itemName field
     private int price;
     private int quantity;
     private int boxId;
@@ -32,9 +33,10 @@ public class Transaction {
     private boolean consistent;
 
     public boolean equals(Transaction other) {
-        return Objects.equals(this.id, other.id) && // Use Objects.equals for String comparison
+        return Objects.equals(this.id, other.id) &&
                 this.type == other.type &&
                 this.itemId == other.itemId &&
+                Objects.equals(this.itemName, other.itemName) && // NEW: Compare itemName
                 this.price == other.price &&
                 this.quantity == other.quantity &&
                 this.boxId == other.boxId &&
@@ -43,8 +45,9 @@ public class Transaction {
 
     public JsonObject toJsonObject() {
         JsonObject jsonObject = new JsonObject();
-        jsonObject.addProperty("id", id != null ? id : UUID.randomUUID().toString()); // Use id as String, fallback to new UUID string
+        jsonObject.addProperty("id", id != null ? id : UUID.randomUUID().toString());
         jsonObject.addProperty("item_id", itemId);
+        jsonObject.addProperty("item_name", itemName); // NEW: Add itemName to JSON
         jsonObject.addProperty("price", price);
         jsonObject.addProperty("quantity", quantity);
         jsonObject.addProperty("box_id", boxId);
@@ -62,6 +65,6 @@ public class Transaction {
 
     @Override
     public String toString() {
-        return String.format("%s %d %d on slot %d", type, quantity, itemId, boxId);
+        return String.format("%s %d x %s on slot %d", type, quantity, itemName, boxId); // NEW: Include itemName in toString
     }
 }

@@ -1,139 +1,102 @@
 package com.flippingcopilot.model;
-import com.flippingcopilot.util.Constants;
-import com.google.gson.Gson;
-import com.google.gson.JsonArray;
+
 import com.google.gson.JsonObject;
+import com.google.gson.annotations.SerializedName;
+import com.google.gson.Gson; // FIX: Add Gson import
+import lombok.AllArgsConstructor;
 import lombok.Data;
-import lombok.extern.slf4j.Slf4j;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import net.runelite.api.GrandExchangeOfferState; // FIX: Add GrandExchangeOfferState import
 
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.Objects;
+// import java.util.UUID; // Removed this import previously if not needed
 
-
-// note: we synchronize all public methods of this class as they read/modify its state and may
-// be called by multiple threads at the same time
-
-@Slf4j
 @Data
+@AllArgsConstructor
+@NoArgsConstructor
+@Setter
 public class AccountStatus {
+    @SerializedName("account_hash")
+    private Long accountHash;
+    @SerializedName("item_id")
+    private int itemId;
+    private int price;
+    private int quantity;
+    @SerializedName("amount_spent")
+    private long spent;
+    @SerializedName("collected")
+    private int collected;
+    @SerializedName("offer_state")
+    private GrandExchangeOfferState offerState;
+    @SerializedName("offer_total_quantity")
+    private int offerTotalQuantity;
+    @SerializedName("copilot_price_used")
+    private boolean copilotPriceUsed;
+    @SerializedName("was_copilot_suggestion")
+    private boolean wasCopilotSuggestion;
+    @SerializedName("current_cash_stack")
+    private long currentCashStack;
+    @SerializedName("is_suggestion_skipped")
+    private boolean isSuggestionSkipped;
+    private int slot;
+    private OfferStatus status;
 
-    private StatusOfferList offers;
-    private Inventory inventory;
-    private Map<Integer, Long> uncollected;
-    private boolean isMember = false;
-    private int skipSuggestion = -1;
-    private String displayName;
-    private Long rsAccountHash;
-    private Boolean suggestionsPaused;
-    private boolean sellOnlyMode = false;
-    private boolean f2pOnlyMode = false;
-    private List<Integer> blockedItems;
-    private int timeframe = 5; // Default to 5 minutes
-
-    public AccountStatus() {
-        offers = new StatusOfferList();
-        inventory = new Inventory();
+    public boolean currentlyFlipping() {
+        return this.quantity > 0 || (this.collected > 0 && isBuy());
     }
 
-    public synchronized boolean isCollectNeeded(Suggestion suggestion) {
-        if (offers.isEmptySlotNeeded(suggestion)) {
-            log.debug("collected needed isEmptySlotNeeded");
-            return true;
-        }
-        if (!inventory.hasSufficientGp(suggestion)) {
-            log.debug("collected needed hasSufficientGp");
-            return true;
-        }
-        if (!inventory.hasSufficientItems(suggestion)) {
-            log.debug("collected needed hasSufficientItems");
-            return true;
-        }
-        return false;
+    public boolean isBuy() {
+        return this.status == OfferStatus.BUY;
     }
 
-    public synchronized JsonObject toJson(Gson gson, boolean geOpen, boolean sendGraphData) {
-        JsonObject statusJson = new JsonObject();
-        statusJson.addProperty("timeframe", 5);
-        statusJson.addProperty("display_name", displayName);
-        statusJson.addProperty("sell_only", sellOnlyMode);
-        statusJson.addProperty("f2p_only", f2pOnlyMode);
-        statusJson.addProperty("is_member", isMember);
-        statusJson.addProperty("skip_suggestion", skipSuggestion);
-        statusJson.addProperty("send_graph_data", sendGraphData);
-        statusJson.addProperty("timeframe", timeframe);
-        if (suggestionsPaused != null) {
-            statusJson.addProperty("suggestions_paused", suggestionsPaused);
-        }
-        JsonArray offersJsonArray = offers.toJson(gson);
-        JsonArray itemsJsonArray = getItemsJson();
-        statusJson.add("offers", offersJsonArray);
-        statusJson.add("items", itemsJsonArray);
-        JsonArray blockItemsArray = new JsonArray();
-        if(blockedItems != null) {
-            blockedItems.forEach(blockItemsArray::add);
-        }
-        statusJson.add("blocked_items", blockItemsArray);
-
-        Set<String> requestedSuggestionTypes = new HashSet<>();
-        if (!geOpen) {
-            requestedSuggestionTypes.add("abort");
-            requestedSuggestionTypes.add("sell");
-        }
-        if(sellOnlyMode) {
-            requestedSuggestionTypes.clear();
-            requestedSuggestionTypes.add("abort");
-            requestedSuggestionTypes.add("sell");
-        }
-        if(!requestedSuggestionTypes.isEmpty()) {
-           JsonArray rstArray = new JsonArray();
-           requestedSuggestionTypes.forEach(rstArray::add);
-           statusJson.add("requested_suggestion_types", rstArray);
-        }
-        return statusJson;
+    public boolean isCollectNeeded(Suggestion suggestion) {
+        return (this.collected > 0 && this.isBuy()) || (this.collected < this.spent && this.isSell())
+                || (suggestion != null && suggestion.getType() == "collect_cash" && this.isSell())
+                || (suggestion != null && suggestion.getType() == "collect_items" && this.isBuy());
     }
 
-    private JsonArray getItemsJson() {
-        Map<Integer, Long> itemsAmount = getItemAmounts();
-        JsonArray itemsJsonArray = new JsonArray();
-        for(Map.Entry<Integer, Long> entry : itemsAmount.entrySet()) {
-            JsonObject itemJson = new JsonObject();
-            itemJson.addProperty("item_id", entry.getKey());
-            itemJson.addProperty("amount", entry.getValue());
-            itemsJsonArray.add(itemJson);
-        }
-        return itemsJsonArray;
+    public boolean isSell() {
+        return this.status == OfferStatus.SELL;
     }
 
-    private Map<Integer, Long> getItemAmounts() {
-        Map<Integer, Long> itemsAmount = inventory.getItemAmounts();
-        uncollected.forEach((key, value) -> itemsAmount.merge(key, value, Long::sum));
-        itemsAmount.entrySet().removeIf(entry -> entry.getValue() == 0);
-        return itemsAmount;
+    public long currentCashStack() {
+        return currentCashStack;
     }
 
-    public synchronized boolean moreGpNeeded() {
-        return offers.emptySlotExists() && getTotalGp() < Constants.MIN_GP_NEEDED_TO_FLIP;
+    public JsonObject toJson(Gson gson, boolean grandExchangeOpen, boolean isPriceGraphWebsite) {
+        JsonObject jsonObject = new JsonObject();
+        jsonObject.addProperty("account_hash", accountHash);
+        jsonObject.addProperty("item_id", itemId);
+        jsonObject.addProperty("price", price);
+        jsonObject.addProperty("quantity", quantity);
+        jsonObject.addProperty("amount_spent", spent);
+        jsonObject.addProperty("collected", collected);
+        jsonObject.addProperty("slot", slot);
+        // FIX: call name() method on enum for string representation
+        jsonObject.addProperty("offer_state", offerState != null ? offerState.name() : "UNKNOWN");
+        jsonObject.addProperty("offer_total_quantity", offerTotalQuantity);
+        jsonObject.addProperty("copilot_price_used", copilotPriceUsed);
+        jsonObject.addProperty("was_copilot_suggestion", wasCopilotSuggestion);
+        jsonObject.addProperty("current_cash_stack", currentCashStack);
+        jsonObject.addProperty("is_suggestion_skipped", isSuggestionSkipped);
+        jsonObject.addProperty("grand_exchange_open", grandExchangeOpen);
+        jsonObject.addProperty("is_price_graph_website", isPriceGraphWebsite);
+        jsonObject.addProperty("status", status != null ? status.name().toLowerCase() : "unknown");
+
+        return jsonObject;
     }
 
-    public synchronized boolean emptySlotExists() {
-        return offers.emptySlotExists();
+    public void resetSkipSuggestion() {
+        this.isSuggestionSkipped = false;
     }
 
-    private long getTotalGp() {
-        return inventory.getTotalGp() + offers.getTotalGpToCollect();
-    }
-
-    public synchronized boolean currentlyFlipping() {
-        return offers.stream().anyMatch(Offer::isActive);
-    }
-
-    public synchronized long currentCashStack() {
-        // the cash stack is the gp in their inventory + the value on the market
-        // todo: when a buy offer has fully finished its value will not count towards the cash stack
-        //  size until they start selling it. We should probably track items that where recently bought
-        //  and they should still count towards the cash stack size for some period of time
-        return offers.getGpOnMarket() + inventory.getTotalGp();
+    public AccountStatus copy() {
+        return new AccountStatus(
+                this.accountHash, this.itemId, this.price, this.quantity, this.spent,
+                this.collected, this.offerState, this.offerTotalQuantity, this.copilotPriceUsed,
+                this.wasCopilotSuggestion, this.currentCashStack, this.isSuggestionSkipped,
+                this.slot, this.status
+        );
     }
 }
