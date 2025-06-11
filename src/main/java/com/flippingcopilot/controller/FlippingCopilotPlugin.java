@@ -94,7 +94,6 @@ public class FlippingCopilotPlugin extends Plugin {
 	protected void startUp() throws Exception {
 		Persistance.setUp(gson);
 
-		// seems we need to delay instantiating the UI till here as otherwise the panels look different
 		mainPanel = injector.getInstance(MainPanel.class);
 		final BufferedImage icon = ImageUtil.loadImageResource(getClass(), "/icon-small.png");
 		navButton = NavigationButton.builder()
@@ -106,10 +105,12 @@ public class FlippingCopilotPlugin extends Plugin {
 		clientToolbar.addNavigation(navButton);
 
 		copilotLoginController.setLoginPanel(mainPanel.loginPanel);
+		// Fix: Explicitly set signupPanel in CopilotLoginController
+		copilotLoginController.setSignupPanel(mainPanel.signupPanel);
 		copilotLoginController.setMainPanel(mainPanel);
 		suggestionController.setCopilotPanel(mainPanel.copilotPanel);
 		suggestionController.setMainPanel(mainPanel);
-		suggestionController.setLoginPanel(mainPanel.loginPanel);
+		suggestionController.setLoginPanel(mainPanel.loginPanel); // Ensure this is also the V2 version
 		suggestionController.setSuggestionPanel(mainPanel.copilotPanel.suggestionPanel);
 		grandExchangeCollectHandler.setSuggestionPanel(mainPanel.copilotPanel.suggestionPanel);
 		statsPanel = mainPanel.copilotPanel.statsPanel;
@@ -123,18 +124,18 @@ public class FlippingCopilotPlugin extends Plugin {
 			flipManager.setIntervalStartTime(sessionManager.getCachedSessionData().startTime);
 		}
 		executorService.scheduleAtFixedRate(() ->
-			clientThread.invoke(() -> {
-				boolean loginValid = osrsLoginManager.isValidLoginState();
-				if (loginValid) {
-					AccountStatus accStatus = accountStatusManager.getAccountStatus();
-					boolean isFlipping = accStatus != null && accStatus.currentlyFlipping();
-					long cashStack = accStatus == null ? 0 : accStatus.currentCashStack();
-					if(sessionManager.updateSessionStats(isFlipping, cashStack)) {
-						mainPanel.copilotPanel.statsPanel.refresh(false, loginResponseManager.isLoggedIn() && osrsLoginManager.isValidLoginState());
-					}
-				}
-			})
-		, 2000, 1000, TimeUnit.MILLISECONDS);
+						clientThread.invoke(() -> {
+							boolean loginValid = osrsLoginManager.isValidLoginState();
+							if (loginValid) {
+								AccountStatus accStatus = accountStatusManager.getAccountStatus();
+								boolean isFlipping = accStatus != null && accStatus.currentlyFlipping();
+								long cashStack = accStatus == null ? 0 : accStatus.currentCashStack();
+								if(sessionManager.updateSessionStats(isFlipping, cashStack)) {
+									mainPanel.copilotPanel.statsPanel.refresh(false, loginResponseManager.isLoggedIn() && osrsLoginManager.isValidLoginState());
+								}
+							}
+						})
+				, 2000, 1000, TimeUnit.MILLISECONDS);
 	}
 
 	@Override
@@ -224,9 +225,6 @@ public class FlippingCopilotPlugin extends Plugin {
 				osrsLoginManager.setLastLoginTick(client.getTickCount());
 				break;
 			case LOGGED_IN:
-				// we want to update the flips panel on login but unfortunately the display name
-				// is not available immediately so schedule what we need to do here for in the future
-				// todo: move to just using the accountHash which is available immediately to simply things
 				clientThread.invokeLater(() -> {
 					if (client.getGameState() != GameState.LOGGED_IN) {
 						return true;
@@ -261,6 +259,7 @@ public class FlippingCopilotPlugin extends Plugin {
 			String displayName = osrsLoginManager.getLastDisplayName();
 			webHookController.sendMessage(flipManager.calculateStats(sessionManager.getCachedSessionData().startTime, displayName), sessionManager.getCachedSessionData(), displayName, false);
 		}
+		keybindHandler.unregister();
 	}
 
 	@Subscribe

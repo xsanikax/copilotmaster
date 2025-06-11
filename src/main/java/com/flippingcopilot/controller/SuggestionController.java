@@ -47,7 +47,8 @@ public class SuggestionController {
     private final PriceGraphController graphPriceGraphController;
 
     private MainPanel mainPanel;
-    private LoginPanel loginPanel;
+    // Change type from LoginPanel to LoginPanelV2
+    private LoginPanelV2 loginPanel; //
     private CopilotPanel copilotPanel;
     private SuggestionPanel suggestionPanel;
 

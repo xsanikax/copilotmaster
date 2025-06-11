@@ -28,7 +28,10 @@ import java.util.function.Consumer;
 @RequiredArgsConstructor(onConstructor_ = @Inject)
 public class ApiRequestHandler {
 
-    private static final String serverUrl = System.getenv("FLIPPING_COPILOT_HOST") != null ? System.getenv("FLIPPING_COPILOT_HOST")  : "https://api.flippingcopilot.com";
+    // --- IMPORTANT: Set this to your Firebase Functions 'api' endpoint URL ---
+    // This is the base URL for ALL your backend interactions (auth and data).
+    private static final String FIREBASE_FUNCTIONS_BASE_URL = "https://api-jxxf26wq5q-nw.a.run.app";
+
     public static final String DEFAULT_COPILOT_PRICE_ERROR_MESSAGE = "Unable to fetch price copilot price (possible server update)";
     public static final String DEFAULT_PREMIUM_INSTANCE_ERROR_MESSAGE = "Error loading premium instance data (possible server update)";
 
@@ -44,45 +47,102 @@ public class ApiRequestHandler {
     private Instant lastDebugMessageSent = Instant.now();
 
 
-    public void authenticate(String username, String password, Runnable callback) {
+    public void authenticate(String email, String password, Runnable callback) {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("email", email);
+        payload.addProperty("password", password);
+
         Request request = new Request.Builder()
-                .url(serverUrl + "/login")
-                .addHeader("Authorization", Credentials.basic(username, password))
-                .post(RequestBody.create(MediaType.get("application/json; charset=utf-8"), ""))
+                .url(FIREBASE_FUNCTIONS_BASE_URL + "/login")
+                .post(RequestBody.create(MediaType.get("application/json; charset=utf-8"), payload.toString()))
                 .build();
 
         client.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
-                callback.run();
+                log.warn("Login failed: Network or server error", e);
+                clientThread.invoke(() -> {
+                    loginResponseManager.setLoginResponse(new LoginResponse(true, "Network or server error", null, -1));
+                    callback.run();
+                });
             }
             @Override
             public void onResponse(Call call, Response response) {
                 try {
-                    if (!response.isSuccessful()) {
-                        log.warn("login failed with http status code {}", response.code());
-                    }
                     String body = response.body() == null ? "" : response.body().string();
-                    LoginResponse loginResponse = gson.fromJson(body, LoginResponse.class);
-                    loginResponseManager.setLoginResponse(loginResponse);
-                } catch (IOException e) {
-                    log.warn("error reading/decoding login response body", e);
-                } catch (JsonParseException e) {
-                    loginResponseManager.setLoginResponse(new LoginResponse(true, response.message(), null, -1));
+                    JsonObject jsonResponse = gson.fromJson(body, JsonObject.class);
+
+                    if (response.isSuccessful()) {
+                        String jwtToken = jsonResponse.get("jwt").getAsString();
+                        String message = jsonResponse.has("message") ? jsonResponse.get("message").getAsString() : "Login successful";
+                        int userId = jsonResponse.has("user_id") ? jsonResponse.get("user_id").getAsInt() : 1;
+                        loginResponseManager.setLoginResponse(new LoginResponse(false, message, jwtToken, userId));
+                    } else {
+                        String message = jsonResponse.has("message") ? jsonResponse.get("message").getAsString() : "Login failed: " + (jsonResponse.has("message") ? jsonResponse.get("message").getAsString() : response.message());
+                        loginResponseManager.setLoginResponse(new LoginResponse(true, message, null, -1));
+                    }
+                } catch (IOException | JsonParseException | NullPointerException e) {
+                    log.warn("Error reading/decoding login response", e);
+                    loginResponseManager.setLoginResponse(new LoginResponse(true, "Unexpected response from server", null, -1));
                 } finally {
-                    callback.run();
+                    clientThread.invoke(callback);
                 }
             }
         });
     }
 
+    public void registerUser(String email, String password, Runnable callback) {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("email", email);
+        payload.addProperty("password", password);
+
+        Request request = new Request.Builder()
+                .url(FIREBASE_FUNCTIONS_BASE_URL + "/signup")
+                .post(RequestBody.create(MediaType.get("application/json; charset=utf-8"), payload.toString()))
+                .build();
+
+        client.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                log.warn("Registration failed: Network or server error", e);
+                clientThread.invoke(() -> {
+                    loginResponseManager.setLoginResponse(new LoginResponse(true, "Network or server error", null, -1));
+                    callback.run();
+                });
+            }
+            @Override
+            public void onResponse(Call call, Response response) {
+                try {
+                    String body = response.body() == null ? "" : response.body().string();
+                    JsonObject jsonResponse = gson.fromJson(body, JsonObject.class);
+
+                    if (response.isSuccessful()) {
+                        String message = jsonResponse.has("message") ? jsonResponse.get("message").getAsString() : "Registration successful";
+                        String jwtToken = jsonResponse.has("idToken") ? jsonResponse.get("idToken").getAsString() : null;
+                        int userId = jsonResponse.has("uid") ? jsonResponse.get("uid").getAsInt() : 1;
+                        loginResponseManager.setLoginResponse(new LoginResponse(false, message, jwtToken, userId));
+                    } else {
+                        String message = jsonResponse.has("message") ? jsonResponse.get("message").getAsString() : "Registration failed: " + response.message();
+                        loginResponseManager.setLoginResponse(new LoginResponse(true, message, null, -1));
+                    }
+                } catch (IOException | JsonParseException | NullPointerException e) {
+                    log.warn("Error reading/decoding registration response", e);
+                    loginResponseManager.setLoginResponse(new LoginResponse(true, "Unexpected response from server", null, -1));
+                } finally {
+                    clientThread.invoke(callback);
+                }
+            }
+        });
+    }
+
+
     public void getSuggestionAsync(JsonObject status,
                                    Consumer<Suggestion> suggestionConsumer,
                                    Consumer<Data> graphDataConsumer,
-                                   Consumer<HttpResponseException>  onFailure) {
+                                   Consumer<HttpResponseException> onFailure) {
         log.debug("sending status {}", status.toString());
         Request request = new Request.Builder()
-                .url(serverUrl + "/suggestion")
+                .url(FIREBASE_FUNCTIONS_BASE_URL + "/suggestion")
                 .addHeader("Authorization", "Bearer " + loginResponseManager.getJwtToken())
                 .addHeader("Accept", "application/x-msgpack")
                 .post(RequestBody.create(MediaType.get("application/json; charset=utf-8"), status.toString()))
@@ -124,12 +184,7 @@ public class ApiRequestHandler {
             log.debug("msgpack suggestion response size is: {}, suggestion size is {}", contentLength, suggestionContentLength);
 
             Data d = new Data();
-            try(InputStream is = response.body().byteStream()) {
-                // This is some bespoke handling to make the user experience better. We basically pack two different
-                // objects in the response body. The suggestion (first object) and the graph data (second
-                // object). The graph data can be a few kb, and we want the suggestion to be displayed
-                // immediately, without having to wait for the graph data to be loaded.
-
+            try (InputStream is = response.body().byteStream()) {
                 byte[] suggestionBytes = new byte[suggestionContentLength];
                 int bytesRead = is.readNBytes(suggestionBytes, 0, suggestionContentLength);
                 if (bytesRead != suggestionContentLength) {
@@ -162,7 +217,7 @@ public class ApiRequestHandler {
                     }
                 }
             }
-            if (s != null && "wait".equals(s.getType())){
+            if (s != null && "wait".equals(s.getType())) {
                 d.fromWaitSuggestion = true;
             }
             Data finalD = d;
@@ -182,7 +237,7 @@ public class ApiRequestHandler {
         try {
             String cl = resp.header("Content-Length");
             return Integer.parseInt(cl != null ? cl : "missing Content-Length header");
-        } catch (NumberFormatException  e) {
+        } catch (NumberFormatException e) {
             throw new IOException("Failed to parse response Content-Length", e);
         }
     }
@@ -191,7 +246,7 @@ public class ApiRequestHandler {
         try {
             String cl = resp.header("X-Suggestion-Content-Length");
             return Integer.parseInt(cl != null ? cl : "missing Content-Length header");
-        } catch (NumberFormatException  e) {
+        } catch (NumberFormatException e) {
             throw new IOException("Failed to parse response Content-Length", e);
         }
     }
@@ -204,7 +259,7 @@ public class ApiRequestHandler {
         }
         String encodedDisplayName = URLEncoder.encode(displayName, StandardCharsets.UTF_8);
         Request request = new Request.Builder()
-                .url(serverUrl + "/profit-tracking/client-transactions?display_name=" + encodedDisplayName)
+                .url(FIREBASE_FUNCTIONS_BASE_URL + "/profit-tracking/client-transactions?display_name=" + encodedDisplayName)
                 .addHeader("Authorization", "Bearer " + loginResponseManager.getJwtToken())
                 .post(RequestBody.create(MediaType.get("application/json; charset=utf-8"), body.toString()))
                 .build();
@@ -225,7 +280,8 @@ public class ApiRequestHandler {
                         return;
                     }
                     String body = response.body() == null ? "" : response.body().string();
-                    List<FlipV2> changedFlips = gson.fromJson(body, new TypeToken<List<FlipV2>>(){}.getType());
+                    List<FlipV2> changedFlips = gson.fromJson(body, new TypeToken<List<FlipV2>>() {
+                    }.getType());
                     onSuccess.accept(changedFlips);
                 } catch (IOException | JsonParseException e) {
                     log.warn("error reading/parsing sync transactions response body", e);
@@ -259,7 +315,7 @@ public class ApiRequestHandler {
         body.addProperty("include_graph_data", true);
         log.debug("requesting price graph data for item {}", itemId);
         Request request = new Request.Builder()
-                .url(serverUrl +"/prices")
+                .url(FIREBASE_FUNCTIONS_BASE_URL + "/prices")
                 .addHeader("Authorization", "Bearer " + loginResponseManager.getJwtToken())
                 .addHeader("Accept", "application/x-msgpack")
                 .post(RequestBody.create(MediaType.get("application/json; charset=utf-8"), body.toString()))
@@ -270,32 +326,32 @@ public class ApiRequestHandler {
                 .build()
                 .newCall(request)
                 .enqueue(new Callback() {
-            @Override
-            public void onFailure(Call call, IOException e) {
-                log.error("error fetching copilot price for item {}", itemId, e);
-                ItemPrice ip = new ItemPrice(0, 0, DEFAULT_COPILOT_PRICE_ERROR_MESSAGE, null);
-                clientThread.invoke(() -> consumer.accept(ip));
-            }
-            @Override
-            public void onResponse(Call call, Response response) {
-                try {
-                    if (!response.isSuccessful()) {
-                        log.error("get copilot price for item {} failed with http status code {}", itemId, response.code());
+                    @Override
+                    public void onFailure(Call call, IOException e) {
+                        log.error("error fetching copilot price for item {}", itemId, e);
                         ItemPrice ip = new ItemPrice(0, 0, DEFAULT_COPILOT_PRICE_ERROR_MESSAGE, null);
                         clientThread.invoke(() -> consumer.accept(ip));
-                    } else {
-                        byte[] d = response.body().bytes();
-                        ItemPrice ip = ItemPrice.fromMsgPack(ByteBuffer.wrap(d));
-                        log.debug("price graph data received for item {}", itemId);
-                        clientThread.invoke(() -> consumer.accept(ip));
                     }
-                } catch (Exception e) {
-                    log.error("error fetching copilot price for item {}", itemId, e);
-                    ItemPrice ip = new ItemPrice(0, 0, DEFAULT_COPILOT_PRICE_ERROR_MESSAGE, null);
-                    clientThread.invoke(() -> consumer.accept(ip));
-                }
-            }
-        });
+                    @Override
+                    public void onResponse(Call call, Response response) {
+                        try {
+                            if (!response.isSuccessful()) {
+                                log.error("get copilot price for item {} failed with http status code {}", itemId, response.code());
+                                ItemPrice ip = new ItemPrice(0, 0, DEFAULT_COPILOT_PRICE_ERROR_MESSAGE, null);
+                                clientThread.invoke(() -> consumer.accept(ip));
+                            } else {
+                                byte[] d = response.body().bytes();
+                                ItemPrice ip = ItemPrice.fromMsgPack(ByteBuffer.wrap(d));
+                                log.debug("price graph data received for item {}", itemId);
+                                clientThread.invoke(() -> consumer.accept(ip));
+                            }
+                        } catch (Exception e) {
+                            log.error("error fetching copilot price for item {}", itemId, e);
+                            ItemPrice ip = new ItemPrice(0, 0, DEFAULT_COPILOT_PRICE_ERROR_MESSAGE, null);
+                            clientThread.invoke(() -> consumer.accept(ip));
+                        }
+                    }
+                });
     }
 
 
@@ -306,7 +362,7 @@ public class ApiRequestHandler {
         payload.add("premium_display_names", arr);
 
         Request request = new Request.Builder()
-                .url(serverUrl +"/premium-instances/update-assignments")
+                .url(FIREBASE_FUNCTIONS_BASE_URL + "/premium-instances/update-assignments")
                 .addHeader("Authorization", "Bearer " + loginResponseManager.getJwtToken())
                 .post(RequestBody.create(MediaType.get("application/json; charset=utf-8"), payload.toString()))
                 .build();
@@ -337,7 +393,7 @@ public class ApiRequestHandler {
 
     public void asyncGetPremiumInstanceStatus(Consumer<PremiumInstanceStatus> consumer) {
         Request request = new Request.Builder()
-                .url(serverUrl +"/premium-instances/status")
+                .url(FIREBASE_FUNCTIONS_BASE_URL + "/premium-instances/status")
                 .addHeader("Authorization", "Bearer " + loginResponseManager.getJwtToken())
                 .get()
                 .build();
@@ -367,14 +423,13 @@ public class ApiRequestHandler {
     }
 
     public ItemPrice getItemPrice(int itemId, String displayName) {
-        JsonObject respObj = null;
         try {
             JsonObject body = new JsonObject();
             body.add("item_id", new JsonPrimitive(itemId));
             body.add("display_name", new JsonPrimitive(displayName));
             body.addProperty("f2p_only", preferencesManager.getPreferences().isF2pOnlyMode());
             body.addProperty("timeframe_minutes", preferencesManager.getTimeframe());
-            return doHttpRequest("POST", body, "/prices", ItemPrice.class);
+            return doHttpRequest("POST", body, FIREBASE_FUNCTIONS_BASE_URL + "/prices", ItemPrice.class);
         } catch (HttpResponseException e) {
             log.error("error fetching copilot price for item {}, resp code {}", itemId, e.getResponseCode(), e);
             return new ItemPrice(0, 0, "Unable to fetch price copilot price (possible server update)", null);
@@ -382,26 +437,26 @@ public class ApiRequestHandler {
     }
 
     public Map<String, Integer> loadUserDisplayNames() throws HttpResponseException {
-        Type respType = new TypeToken<Map<String, Integer>>(){}.getType();
-        Map<String, Integer> names = doHttpRequest("GET", null, "/profit-tracking/rs-account-names", respType);
-        return names == null ? new HashMap<>() : names;
+        Type respType = new TypeToken<Map<String, Integer>>() {
+        }.getType();
+        return doHttpRequest("GET", null, FIREBASE_FUNCTIONS_BASE_URL + "/profit-tracking/rs-account-names", respType);
     }
 
     public List<FlipV2> LoadFlips() throws HttpResponseException {
-        Type respType = new TypeToken<List<FlipV2>>(){}.getType();
-        List<FlipV2> flips = doHttpRequest("GET", null, "/profit-tracking/client-flips", respType);
-        return flips == null ? new ArrayList<>() : flips;
+        Type respType = new TypeToken<List<FlipV2>>() {
+        }.getType();
+        return doHttpRequest("GET", null, FIREBASE_FUNCTIONS_BASE_URL + "/profit-tracking/client-flips", respType);
     }
 
-    public <T> T doHttpRequest(String method, JsonElement bodyJson, String route, Type responseType) throws HttpResponseException {
+    public <T> T doHttpRequest(String method, JsonElement bodyJson, String fullUrl, Type responseType) throws HttpResponseException {
         String jwtToken = loginResponseManager.getJwtToken();
         if (jwtToken == null) {
-            throw new IllegalStateException("Not authenticated");
+            throw new IllegalStateException("Not authenticated. Please log in.");
         }
 
         RequestBody body = bodyJson == null ? null : RequestBody.create(MediaType.get("application/json; charset=utf-8"), bodyJson.toString());
         Request request = new Request.Builder()
-                .url(serverUrl + route)
+                .url(fullUrl)
                 .addHeader("Authorization", "Bearer " + jwtToken)
                 .method(method, body)
                 .build();
@@ -424,20 +479,19 @@ public class ApiRequestHandler {
     public void sendDebugData(JsonObject bodyJson) {
         String jwtToken = loginResponseManager.getJwtToken();
         Instant now = Instant.now();
-        if (now.minusSeconds(5).isBefore(lastDebugMessageSent)){
-            // we don't want to spam
+        if (now.minusSeconds(5).isBefore(lastDebugMessageSent)) {
             return;
         }
         RequestBody body = RequestBody.create(MediaType.get("application/json; charset=utf-8"), bodyJson.toString());
         Request request = new Request.Builder()
-                .url(serverUrl + "/debug-data")
+                .url(FIREBASE_FUNCTIONS_BASE_URL + "/debug-data")
                 .addHeader("Authorization", "Bearer " + jwtToken)
                 .method("POST", body)
                 .build();
         client.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
-               log.debug("failed to send debug data", e);
+                log.debug("failed to send debug data", e);
             }
             @Override
             public void onResponse(Call call, Response response) {}
