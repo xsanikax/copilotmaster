@@ -4,16 +4,18 @@ import com.flippingcopilot.util.GeTax;
 import com.google.gson.annotations.SerializedName;
 import lombok.Data;
 import java.util.Comparator;
-import java.util.UUID;
+// FIX: REMOVE THIS IMPORT for UUID if not needed elsewhere, as 'id' is now String
+// import java.util.UUID;
 
 @Data
 public class FlipV2 {
 
-    public static UUID MAX_UUID = new UUID(-1L, -1L);
-    public static UUID MIN_UUID = new UUID(0L, 0L);
+    // FIX: Remove these static UUIDs as 'id' is now String
+    // public static UUID MAX_UUID = new UUID(-1L, -1L);
+    // public static UUID MIN_UUID = new UUID(0L, 0L);
 
     @SerializedName("id")
-    private UUID id;
+    private String id; // FIX: Changed type from UUID to String
 
     @SerializedName("account_id")
     private int accountId;
@@ -78,4 +80,5 @@ public class FlipV2 {
         }
         return (receivedPostTax  + taxPaid) / closedQuantity;
     }
+    // If you have custom equals/hashCode, ensure they handle 'id' as String.
 }

@@ -7,7 +7,8 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.Instant;
-import java.util.UUID;
+import java.util.Objects;
+import java.util.UUID; // KEEP this import if you still use UUID.randomUUID() for fallback, but id itself is String
 
 
 @Getter
@@ -16,7 +17,7 @@ import java.util.UUID;
 @Setter
 public class Transaction {
 
-    private UUID id;
+    private String id; // FIX: Changed type from UUID to String
     private OfferStatus type;
     private int itemId;
     private int price;
@@ -31,7 +32,8 @@ public class Transaction {
     private boolean consistent;
 
     public boolean equals(Transaction other) {
-        return this.type == other.type &&
+        return Objects.equals(this.id, other.id) && // Use Objects.equals for String comparison
+                this.type == other.type &&
                 this.itemId == other.itemId &&
                 this.price == other.price &&
                 this.quantity == other.quantity &&
@@ -41,17 +43,20 @@ public class Transaction {
 
     public JsonObject toJsonObject() {
         JsonObject jsonObject = new JsonObject();
-        jsonObject.addProperty("id", id.toString());
+        jsonObject.addProperty("id", id != null ? id : UUID.randomUUID().toString()); // Use id as String, fallback to new UUID string
         jsonObject.addProperty("item_id", itemId);
         jsonObject.addProperty("price", price);
-        jsonObject.addProperty("quantity", type.equals(OfferStatus.BUY) ? quantity : -quantity);
+        jsonObject.addProperty("quantity", quantity);
         jsonObject.addProperty("box_id", boxId);
         jsonObject.addProperty("amount_spent", amountSpent);
-        jsonObject.addProperty("time", timestamp.getEpochSecond());
+        jsonObject.addProperty("time", timestamp != null ? timestamp.getEpochSecond() : 0);
         jsonObject.addProperty("copilot_price_used", copilotPriceUsed);
         jsonObject.addProperty("was_copilot_suggestion", wasCopilotSuggestion);
         jsonObject.addProperty("consistent_previous_offer", consistent);
         jsonObject.addProperty("login", login);
+        jsonObject.addProperty("offer_total_quantity", offerTotalQuantity);
+        jsonObject.addProperty("type", this.type != null ? this.type.name().toLowerCase() : "unknown");
+
         return jsonObject;
     }
 
@@ -60,5 +65,3 @@ public class Transaction {
         return String.format("%s %d %d on slot %d", type, quantity, itemId, boxId);
     }
 }
-
-

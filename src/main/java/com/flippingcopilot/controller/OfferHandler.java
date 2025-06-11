@@ -3,6 +3,7 @@ package com.flippingcopilot.controller;
 import com.flippingcopilot.model.*;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.VarClientStr;
@@ -14,6 +15,7 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.function.Consumer;
 
 import static net.runelite.api.VarPlayer.CURRENT_GE_ITEM;
 
@@ -28,7 +30,7 @@ public class OfferHandler {
     // dependencies
     private final Client client;
     private final SuggestionManager suggestionManager;
-    private final ApiRequestHandler apiRequestHandler;
+    private final ApiRequestHandler apiRequestHandler; // Now uses async methods
     private final OsrsLoginManager osrsLoginManager;
     private final OfferManager offerManager;
     private final HighlightController highlightController;
@@ -49,39 +51,44 @@ public class OfferHandler {
                             Objects.equals(suggestion.getType(), "buy") && isBuying())) {
                 offerManager.setLastViewedSlotItemId(suggestion.getItemId());
                 offerManager.setLastViewedSlotItemPrice(suggestion.getPrice());
-                offerManager.setLastViewedSlotItemPrice((int) Instant.now().getEpochSecond());
+                offerManager.setLastViewedSlotPriceTime((int) Instant.now().getEpochSecond()); // Corrected field name
                 return;
             }
 
             if (!loginResponseManager.isLoggedIn()) {
                 viewedSlotPriceErrorText = "Login to copilot to see item price.";
+                highlightController.redraw(); // Trigger redraw to show error
                 return;
             }
 
-            var fetchedPrice = apiRequestHandler.getItemPrice(currentItemId, osrsLoginManager.getPlayerDisplayName());
+            // --- FIX: Use asynchronous API call ---
+            viewedSlotPriceErrorText = "Fetching price..."; // Show loading state
+            highlightController.redraw(); // Update UI immediately
 
-            if (fetchedPrice == null) {
-                viewedSlotPriceErrorText = "Unknown error";
-                return;
-            }
+            Consumer<ItemPrice> consumer = (fetchedPrice) -> {
+                if (fetchedPrice == null) {
+                    viewedSlotPriceErrorText = "Unknown error fetching price.";
+                } else if (fetchedPrice.getMessage() != null && !fetchedPrice.getMessage().isEmpty()) {
+                    viewedSlotPriceErrorText = fetchedPrice.getMessage();
+                } else {
+                    viewedSlotPriceErrorText = null;
+                    offerManager.setViewedSlotItemPrice(isSelling() ? fetchedPrice.getSellPrice() : fetchedPrice.getBuyPrice());
+                    offerManager.setLastViewedSlotItemId(offerManager.getViewedSlotItemId());
+                    offerManager.setLastViewedSlotItemPrice(offerManager.getViewedSlotItemPrice());
+                    offerManager.setLastViewedSlotPriceTime((int) Instant.now().getEpochSecond()); // Corrected field name
+                    log.debug("fetched item {} price: {}", offerManager.getViewedSlotItemId(), offerManager.getViewedSlotItemPrice());
+                }
+                highlightController.redraw(); // Trigger redraw after price is fetched
+            };
 
-            if (fetchedPrice.getMessage() != null && !fetchedPrice.getMessage().isEmpty()) {
-                viewedSlotPriceErrorText = fetchedPrice.getMessage();
-            } else {
-                viewedSlotPriceErrorText = null;
-            }
-            offerManager.setViewedSlotItemPrice(isSelling() ? fetchedPrice.getSellPrice() : fetchedPrice.getBuyPrice());
-            offerManager.setLastViewedSlotItemId(offerManager.getViewedSlotItemId());
-            offerManager.setLastViewedSlotItemPrice(offerManager.getViewedSlotItemPrice());
-            offerManager.setLastViewedSlotItemPrice((int) Instant.now().getEpochSecond());
+            apiRequestHandler.getItemPriceAsync(currentItemId, osrsLoginManager.getPlayerDisplayName(), consumer);
 
-            log.debug("fetched item {} price: {}", offerManager.getViewedSlotItemId(),  offerManager.getViewedSlotItemPrice());
         } else {
             offerManager.setViewedSlotItemPrice(-1);
             offerManager.setViewedSlotItemId(-1);
             viewedSlotPriceErrorText = null;
         }
-        highlightController.redraw();
+        highlightController.redraw(); // Trigger redraw to clear old highlights
     }
 
     public boolean isSettingQuantity() {

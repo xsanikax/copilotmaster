@@ -1,13 +1,16 @@
 package com.flippingcopilot.model;
 
+import com.flippingcopilot.controller.ApiRequestHandler;
 import com.flippingcopilot.controller.DoesNothingExecutorService;
 import okhttp3.OkHttpClient;
 import org.junit.Assert;
 import org.junit.Test;
+import org.mockito.Mockito;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -27,7 +30,18 @@ public class FlipPriceGraphControllerTest {
         List<FlipV2> flips = generateFlipsBetween(sixMonthsAgo, now, 10_000, List.of(0));
 
         // create and populate the flip cache
-        FlipManager flipManager = new FlipManager(null, new DoesNothingExecutorService(), new OkHttpClient.Builder().build());
+        // FIX: Provide all required dependencies for FlipManager constructor
+        ApiRequestHandler mockApiRequestHandler = Mockito.mock(ApiRequestHandler.class);
+        ScheduledExecutorService mockExecutorService = new DoesNothingExecutorService();
+        OkHttpClient mockOkHttpClient = new OkHttpClient.Builder().build();
+        OsrsLoginManager mockOsrsLoginManager = Mockito.mock(OsrsLoginManager.class); // Mock the new dependency
+
+        FlipManager flipManager = new FlipManager(
+                mockApiRequestHandler,
+                mockExecutorService,
+                mockOkHttpClient,
+                mockOsrsLoginManager // Pass the new mock dependency
+        );
         flipManager.setFlipsChangedCallback(() -> {});
         flipManager.displayNameToAccountId.putAll(displayNameToAccountId);
         flipManager.mergeFlips(flips, null);
@@ -76,7 +90,18 @@ public class FlipPriceGraphControllerTest {
         List<FlipV2> flips = generateFlipsBetween(sixMonthsAgo, now, 5_000, List.of(0, 1, 2));
 
         // create and populate the flip cache
-        FlipManager flipManager = new FlipManager(null, new DoesNothingExecutorService(), new OkHttpClient.Builder().build());
+        // FIX: Provide all required dependencies for FlipManager constructor
+        ApiRequestHandler mockApiRequestHandler = Mockito.mock(ApiRequestHandler.class);
+        ScheduledExecutorService mockExecutorService = new DoesNothingExecutorService();
+        OkHttpClient mockOkHttpClient = new OkHttpClient.Builder().build();
+        OsrsLoginManager mockOsrsLoginManager = Mockito.mock(OsrsLoginManager.class); // Mock the new dependency
+
+        FlipManager flipManager = new FlipManager(
+                mockApiRequestHandler,
+                mockExecutorService,
+                mockOkHttpClient,
+                mockOsrsLoginManager // Pass the new mock dependency
+        );
         flipManager.setFlipsChangedCallback(() -> {});
         flipManager.displayNameToAccountId.putAll(displayNameToAccountId);
         flipManager.mergeFlips(flips, null);
@@ -182,7 +207,8 @@ public class FlipPriceGraphControllerTest {
         List<FlipV2> flips = new ArrayList<>();
         for (int i =0; i< number; i++) {
             FlipV2 f = new FlipV2();
-            f.setId(UUID.randomUUID());
+            // FIX: Convert UUID.randomUUID() to String for FlipV2.id
+            f.setId(UUID.randomUUID().toString()); // Line 210
             f.setAccountId(accountIds.get(new Random().nextInt(accountIds.size())));
             // leave a small percentage as open flips
             if(randomIntBetween(0, 1000) > 2) {

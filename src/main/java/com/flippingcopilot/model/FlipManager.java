@@ -34,6 +34,7 @@ public class FlipManager {
     private final ApiRequestHandler api;
     private final ScheduledExecutorService executorService;
     private final OkHttpClient okHttpClient;
+    private final OsrsLoginManager osrsLoginManager;
 
     @Setter
     private Runnable flipsChangedCallback = () -> {};
@@ -45,7 +46,8 @@ public class FlipManager {
 
     final Map<String, Integer> displayNameToAccountId = new HashMap<>();
     final Map<Integer, Map<Integer, FlipV2>> lastOpenFLipByItemId = new HashMap<>();
-    final Map<UUID, Integer> existingCloseTimes = new HashMap<>();
+    // FIX: Ensure key type is String
+    final Map<String, Integer> existingCloseTimes = new HashMap<>();
     final List<WeekAggregate> weeks = new ArrayList<>(365*5);
 
     private int resetSeq = 0;
@@ -180,12 +182,16 @@ public class FlipManager {
     }
 
     private void loadFlips(int seq) {
-        // ScheduledExecutorService only has one thread, we don't really want to block it. Need to
-        // refactor the API call to be async style but until then just run in okHttpClient's executor
+        final String currentDisplayName = osrsLoginManager.getPlayerDisplayName();
+        if (currentDisplayName == null) {
+            log.debug("No display name available to load flips. Skipping.");
+            return;
+        }
+
         okHttpClient.dispatcher().executorService().submit(() -> {
             try {
                 long s = System.nanoTime();
-                Map<String, Integer> names = api.loadUserDisplayNames();
+                Map<String, Integer> names = api.loadUserDisplayNames(currentDisplayName);
                 synchronized (this) {
                     if (seq != resetSeq) {
                         return;
@@ -194,21 +200,23 @@ public class FlipManager {
                 }
                 log.debug("loading account names took {}ms", (System.nanoTime() - s) / 1000_000);
                 s = System.nanoTime();
-                List<FlipV2> flips = api.LoadFlips();
+                List<FlipV2> flips = api.LoadFlips(currentDisplayName);
                 log.debug("loading {} flips took {}ms", flips.size(), (System.nanoTime() - s) / 1000_000);
                 s = System.nanoTime();
                 synchronized (this) {
                     if (seq != resetSeq) {
                         return;
                     }
-                    mergeFlips(flips, null);
-                    log.debug("merging flips to took {}ms", (System.nanoTime() - s) / 1000_000);
+                    mergeFlips(flips, currentDisplayName);
+                    log.debug("merging flips took {}ms", (System.nanoTime() - s) / 1000_000);
                     flipsLoaded = true;
                 }
                 flipsChangedCallback.run();
-            } catch (Exception e) {
+            }
+            // Catch a broader exception here to log more details.
+            catch (Exception e) {
                 if (this.resetSeq == seq) {
-                    log.warn("failed to load historical flips from server {} try again in 10s", e.getMessage(), e);
+                    log.warn("failed to load historical flips from server {}. Retrying in 10s. Stack: {}", e.getMessage(), e);
                     executorService.schedule(() -> this.loadFlips(seq), 10, TimeUnit.SECONDS);
                 }
             }
@@ -222,18 +230,22 @@ public class FlipManager {
         intervalStats = new Stats();
         displayNameToAccountId.clear();
         lastOpenFLipByItemId.clear();
-        existingCloseTimes.clear();
+        existingCloseTimes.clear(); // Clear existingCloseTimes, keys are String
         weeks.clear();
         flipsLoaded = false;
         resetSeq += 1;
     }
 
     private void mergeFlip_(FlipV2 flip) {
+        // existingCloseTimes is Map<String, Integer>, flip.getId() is String
+        // FIX: Ensure flip.getId() is treated as String
         Integer existingCloseTime = existingCloseTimes.get(flip.getId());
+
         Integer intervalAccountId = intervalDisplayName == null ? null : displayNameToAccountId.getOrDefault(intervalDisplayName, -1);
 
         if(existingCloseTime != null) {
             WeekAggregate wa = getOrInitWeek(existingCloseTime);
+            // removeFlip now takes String ID
             FlipV2 removed = wa.removeFlip(flip.getId(), existingCloseTime, flip.getAccountId());
             if(removed.getClosedTime() >= intervalStartTime && (intervalAccountId == null || removed.getAccountId() == intervalAccountId)) {
                 intervalStats.subtractFlip(removed);
@@ -249,6 +261,7 @@ public class FlipManager {
         } else if (flip.isClosed()) {
             lastOpenFLipByItemId.computeIfAbsent(flip.getAccountId(), (k) -> new HashMap<>()).remove(flip.getItemId());
         }
+        // FIX: Ensure flip.getId() is treated as String
         existingCloseTimes.put(flip.getId(), flip.getClosedTime());
     }
 
@@ -283,12 +296,14 @@ public class FlipManager {
             allStats.addFlip(flip);
             accountIdToStats.computeIfAbsent(accountId, (k) -> new Stats()).addFlip(flip);
             List<FlipV2> flips = accountIdToFlips.computeIfAbsent(accountId, (k) -> new ArrayList<>());
+            // Use String ID for comparison
             int i = bisect(flips.size(), closedTimeCmp(flips, flip.getId(), flip.getClosedTime()));
             flips.add(-i -1, flip);
         }
 
-        FlipV2 removeFlip(UUID id, int closeTime, int accountId) {
+        FlipV2 removeFlip(String id, int closeTime, int accountId) { // FIX: Change id to String
             List<FlipV2> flips = accountIdToFlips.computeIfAbsent(accountId, (k) -> new ArrayList<>());
+            // Use String ID for comparison
             int i = bisect(flips.size(), closedTimeCmp(flips, id, closeTime));
             FlipV2 flip = flips.get(i);
             allStats.subtractFlip(flip);
@@ -305,7 +320,10 @@ public class FlipManager {
             if (time <= weekStart) {
                 return flips;
             }
-            int cut = -bisect(flips.size(), closedTimeCmp(flips, FlipV2.MAX_UUID, time)) - 1;
+            // FIX: Pass a dummy string for ID comparison in bisect if no specific ID is relevant for the range
+            // This string should be chosen such that it reliably sorts beyond any real ID for this purpose.
+            // Using a high Unicode character is a common trick for string "max"
+            int cut = -bisect(flips.size(), closedTimeCmp(flips, "\uFFFF", time)) - 1;
             return flips.subList(cut, flips.size());
         }
 
@@ -327,11 +345,13 @@ public class FlipManager {
         }
     }
 
-    private Function<Integer, Integer> closedTimeCmp(List<FlipV2> flips, UUID id, int time) {
+    // FIX: Change id to String in closedTimeCmp signature
+    private Function<Integer, Integer> closedTimeCmp(List<FlipV2> flips, String id, int time) {
         return (a) -> {
-            // sorts time ascending with id as tie-breaker
             int c = Integer.compare(flips.get(a).getClosedTime(), time);
-            return c != 0 ? c : id.compareTo(flips.get(a).getId());
+            // If times are equal, use String comparison for IDs as a tie-breaker.
+            // Objects.compare handles nulls gracefully and uses natural ordering for Strings.
+            return c != 0 ? c : Objects.compare(id, flips.get(a).getId(), Comparator.naturalOrder());
         };
     }
 
