@@ -34,7 +34,7 @@ public class ApiRequestHandler {
 
 
     public static final String DEFAULT_COPILOT_PRICE_ERROR_MESSAGE = "Unable to fetch price copilot price (possible server update)";
-    public static final String DEFAULT_PREMIUM_INSTANCE_ERROR_MESSAGE = "Error loading premium instance data (possible server update)";
+    public static final String DEFAULT_PREMIUM_INSTANCE_ERROR_MESSAGE = "Error loading premium instance data (possible system update)";
 
 
     private final OkHttpClient client;
@@ -317,7 +317,7 @@ public class ApiRequestHandler {
 
 
     public void sendTransactionsAsync(List<Transaction> transactions, String displayName, Consumer<List<FlipV2>> onSuccess, Consumer<HttpResponseException> onFailure) {
-        log.debug("sending {} transactions for display name {}", transactions.size(), displayName);
+        log.debug("sending {} transactions for display name {}", displayName, transactions.size());
         JsonArray body = new JsonArray();
         for (Transaction transaction : transactions) {
             body.add(transaction.toJsonObject());
@@ -367,7 +367,6 @@ public class ApiRequestHandler {
         Request request = new Request.Builder()
                 .url(API_BASE_URL + "/prices")
                 .addHeader("Authorization", "Bearer " + loginResponseManager.getJwtToken())
-                .addHeader("Accept", "application/x-msgpack")
                 .post(RequestBody.create(MediaType.get("application/json; charset=utf-8"), body.toString()))
                 .build();
 
@@ -402,6 +401,13 @@ public class ApiRequestHandler {
                         }
                     }
                 });
+    }
+
+    // NEW METHOD: Asynchronous getItemPrice
+    public void getItemPriceAsync(int itemId, String displayName, Consumer<ItemPrice> consumer) {
+        // Reuse the existing asyncGetItemPriceWithGraphData for simplicity and consistency
+        // It fetches graph data, but the ItemPrice object is still useful.
+        asyncGetItemPriceWithGraphData(itemId, displayName, consumer);
     }
 
 
@@ -472,30 +478,20 @@ public class ApiRequestHandler {
         });
     }
 
-    public ItemPrice getItemPrice(int itemId, String displayName) {
-        try {
-            JsonObject body = new JsonObject();
-            body.add("item_id", new JsonPrimitive(itemId));
-            body.add("display_name", new JsonPrimitive(displayName));
-            body.addProperty("f2p_only", preferencesManager.getPreferences().isF2pOnlyMode());
-            body.addProperty("timeframe_minutes", preferencesManager.getTimeframe());
-            return doHttpRequest("POST", body, API_BASE_URL + "/prices", ItemPrice.class);
-        } catch (HttpResponseException e) {
-            log.error("error fetching copilot price for item {}, resp code {}", itemId, e.getResponseCode(), e);
-            return new ItemPrice(0, 0, "Unable to fetch price copilot price (possible server update)", null);
-        }
+    // Removed the synchronous getItemPrice and changed LoadFlips to accept display_name
+    // public ItemPrice getItemPrice(int itemId, String displayName) { ... } // Removed
+    // public Map<String, Integer> loadUserDisplayNames() throws HttpResponseException { ... } // Will be updated to take display name
+
+    public Map<String, Integer> loadUserDisplayNames(String displayName) throws HttpResponseException {
+        Type respType = new TypeToken<Map<String, Integer>>() {}.getType();
+        String encodedDisplayName = URLEncoder.encode(displayName, StandardCharsets.UTF_8);
+        return doHttpRequest("GET", null, API_BASE_URL + "/profit-tracking/rs-account-names?display_name=" + encodedDisplayName, respType);
     }
 
-    public Map<String, Integer> loadUserDisplayNames() throws HttpResponseException {
-        Type respType = new TypeToken<Map<String, Integer>>() {
-        }.getType();
-        return doHttpRequest("GET", null, API_BASE_URL + "/profit-tracking/rs-account-names", respType);
-    }
-
-    public List<FlipV2> LoadFlips() throws HttpResponseException {
-        Type respType = new TypeToken<List<FlipV2>>() {
-        }.getType();
-        return doHttpRequest("GET", null, API_BASE_URL + "/profit-tracking/client-flips", respType);
+    public List<FlipV2> LoadFlips(String displayName) throws HttpResponseException { // Now takes display_name
+        Type respType = new TypeToken<List<FlipV2>>() {}.getType();
+        String encodedDisplayName = URLEncoder.encode(displayName, StandardCharsets.UTF_8);
+        return doHttpRequest("GET", null, API_BASE_URL + "/profit-tracking/client-flips?display_name=" + encodedDisplayName, respType);
     }
 
     public <T> T doHttpRequest(String method, JsonElement bodyJson, String fullUrl, Type responseType) throws HttpResponseException {

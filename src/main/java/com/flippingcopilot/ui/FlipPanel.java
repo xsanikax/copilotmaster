@@ -21,18 +21,17 @@ public class FlipPanel extends JPanel {
         setLayout(new BorderLayout());
         setBackground(ColorScheme.DARKER_GRAY_COLOR);
 
-        JLabel itemQuantity = new JLabel(String.format("%d x ", flip.getClosedQuantity()));
-        itemQuantity.setForeground(Color.WHITE);
-
-        JLabel itemNameLabel = new JLabel(UIUtilities.truncateString(flip.getItemName(), 20));
+        // Display quantity and item name
+        JLabel itemQuantityAndName = new JLabel(String.format("%d x %s", flip.getClosedQuantity(), UIUtilities.truncateString(flip.getItemName(), 20)));
+        itemQuantityAndName.setForeground(Color.WHITE);
 
         // Create a sub-panel for the left side
         JPanel leftPanel = new JPanel();
         leftPanel.setLayout(new FlowLayout(FlowLayout.LEFT, 0, 0));
         leftPanel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-        leftPanel.add(itemQuantity);
-        leftPanel.add(itemNameLabel);
+        leftPanel.add(itemQuantityAndName);
 
+        // Display profit, with color based on profit/loss
         JLabel profitLabel = new JLabel(UIUtilities.formatProfitWithoutGp(flip.getProfit()));
         profitLabel.setForeground(UIUtilities.getProfitColor(flip.getProfit(), config));
 
@@ -41,20 +40,44 @@ public class FlipPanel extends JPanel {
         add(profitLabel, BorderLayout.LINE_END);
         setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
 
-        String closeLabel = flip.getClosedQuantity() == flip.getOpenedQuantity() ? "Close time" : "Partial close time";
+        // Tooltip for detailed information
+        String closeLabel = flip.getClosedQuantity() == flip.getOpenedQuantity() ? "Closed time" : "Partial close time";
 
-        String tooltipText = String.format("Opened time: %s\nAvg buy price: %s\n%s: %s\nAvg sell price: %s\nTax paid: %s\nProfit: %s",
+        String tooltipText = String.format("<html>" +
+                        "ID: %s<br>" + // Add ID for debugging
+                        "Item ID: %d<br>" +
+                        "Account: %s<br>" +
+                        "Opened time: %s<br>" +
+                        "Opened quantity: %d<br>" +
+                        "Total spent: %s gp<br>" +
+                        "%s: %s<br>" +
+                        "Closed quantity: %d<br>" +
+                        "Received post-tax: %s gp<br>" +
+                        "Tax paid: %s gp<br>" +
+                        "Profit: %s gp<br>" +
+                        "Is Closed: %b" +
+                        "</html>",
+                flip.getId(),
+                flip.getItemId(),
+                flip.getAccountDisplayName(),
                 formatEpoch(flip.getOpenedTime()),
-                UIUtilities.formatProfit(flip.getAvgBuyPrice()),
+                flip.getOpenedQuantity(),
+                UIUtilities.formatProfitWithoutGp(flip.getSpent()), // Format spent
                 closeLabel,
                 formatEpoch(flip.getClosedTime()),
-                UIUtilities.formatProfit(flip.getAvgSellPrice()),
-                UIUtilities.formatProfit(flip.getTaxPaid()),
-                UIUtilities.formatProfit(flip.getProfit()));
+                flip.getClosedQuantity(),
+                UIUtilities.formatProfitWithoutGp(flip.getReceivedPostTax()), // Format received
+                UIUtilities.formatProfitWithoutGp(flip.getTaxPaid()), // Format tax
+                UIUtilities.formatProfitWithoutGp(flip.getProfit()), // Format profit
+                flip.isClosed()
+        );
         setToolTipText(tooltipText);
     }
 
     public static String formatEpoch(long epochSeconds) {
+        if (epochSeconds <= 0) { // Handle uninitialized or 0 timestamps gracefully
+            return "n/a";
+        }
         Instant instant = Instant.ofEpochSecond(epochSeconds);
         DateTimeFormatter formatter = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM)
                 .withZone(ZoneId.systemDefault());

@@ -107,7 +107,8 @@ public class Persistance {
             log.info("no existing un acked transactions file for {}", displayName);
             return new ArrayList<>();
         }
-        Set<UUID> added = new HashSet<>();
+        // FIX: Change Set<UUID> to Set<String> to match Transaction.id type
+        Set<String> added = new HashSet<>();
         try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
             String line;
             while ((line = reader.readLine()) != null) {
@@ -116,8 +117,7 @@ public class Persistance {
                 }
                 try {
                     Transaction transaction = gson.fromJson(line, Transaction.class);
-                    // there was previously a bug where the same transaction was being added many times to the list
-                    // just clean things here to be safe
+                    // FIX: transaction.getId() is now String, Set<String> accepts it.
                     if (!added.contains(transaction.getId())) {
                         transactions.add(transaction);
                         added.add(transaction.getId());
