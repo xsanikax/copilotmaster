@@ -25,6 +25,7 @@ public class SignupPanel extends JPanel {
     private JTextField usernameTextField;
     private JPasswordField passwordTextField;
     private JLabel errorMessageLabel;
+    private JButton backToLoginButton; // NEW: Back to Login button
 
     public final Spinner spinner = new Spinner();
 
@@ -44,6 +45,7 @@ public class SignupPanel extends JPanel {
         createUsernameInput();
         createPasswordInput();
         createSignupButton();
+        createBackToLoginButton(); // NEW: Call method to create back button
 
         this.add(signupContainer, BorderLayout.NORTH);
     }
@@ -68,6 +70,7 @@ public class SignupPanel extends JPanel {
     public void startLoading() {
         spinner.show();
         signupButton.setEnabled(false);
+        backToLoginButton.setEnabled(false); // Disable back button during loading
         errorMessageLabel.setText("");
         errorMessageLabel.setVisible(false);
     }
@@ -75,6 +78,7 @@ public class SignupPanel extends JPanel {
     public void endLoading() {
         spinner.hide();
         signupButton.setEnabled(true);
+        backToLoginButton.setEnabled(true); // Enable back button after loading
     }
 
     public void showSignupErrorMessage(String message) {
@@ -113,7 +117,7 @@ public class SignupPanel extends JPanel {
             @Override
             public void keyPressed(KeyEvent event) {}
         });
-        usernameTextField.addActionListener(e -> copilotLoginController.onSignupPressed(e)); // Explicitly pass ActionEvent
+        usernameTextField.addActionListener(e -> copilotLoginController.onSignupPressed(e));
         JLabel usernameLabel = new JLabel("Email"); // Changed label to Email
         container.add(usernameLabel, BorderLayout.WEST);
         container.add(usernameTextField);
@@ -140,7 +144,7 @@ public class SignupPanel extends JPanel {
             @Override
             public void keyPressed(KeyEvent event) {}
         });
-        passwordTextField.addActionListener(e -> copilotLoginController.onSignupPressed(e)); // Explicitly pass ActionEvent
+        passwordTextField.addActionListener(e -> copilotLoginController.onSignupPressed(e));
         JLabel passwordLabel = new JLabel("Password");
         container.add(passwordLabel);
         container.add(passwordTextField);
@@ -150,9 +154,19 @@ public class SignupPanel extends JPanel {
     private void createSignupButton() {
         JPanel container = new JPanel();
         signupButton = new JButton("Sign Up");
-        signupButton.addActionListener(e -> copilotLoginController.onSignupPressed(e)); // Explicitly pass ActionEvent
+        signupButton.addActionListener(e -> copilotLoginController.onSignupPressed(e));
         container.add(signupButton);
         signupContainer.add(container, BorderLayout.CENTER);
+    }
+
+    // NEW: Method to create the "Back to Login" button
+    private void createBackToLoginButton() {
+        JPanel container = new JPanel();
+        backToLoginButton = new JButton("Back to Login");
+        // Action to switch back to the login page
+        backToLoginButton.addActionListener(e -> copilotLoginController.showLoginPage());
+        container.add(backToLoginButton);
+        signupContainer.add(container, BorderLayout.CENTER); // Add it below the signup button
     }
 
     public void refresh() {

@@ -53,7 +53,7 @@ public class MainPanel extends PluginPanel {
         setBorder(BorderFactory.createEmptyBorder(5, 6, 5, 6));
 
         // Initialize top bar once
-        topBarPanel = new JPanel(new BorderLayout()); // Use BorderLayout for topBarPanel
+        topBarPanel = new JPanel(new BorderLayout());
         topBarPanel.setBorder(new EmptyBorder(3, 0, 10, 0));
         add(topBarPanel, BorderLayout.NORTH);
 
@@ -71,7 +71,6 @@ public class MainPanel extends PluginPanel {
         // Initial view setup
         updateTopBar(false); // Default to logged out top bar
         cardLayout.show(cardPanel, LOGIN_VIEW); // Explicitly show login view on init
-        // Call revalidate/repaint on startup to ensure initial state is correctly rendered
         revalidate();
         repaint();
     }
@@ -91,7 +90,6 @@ public class MainPanel extends PluginPanel {
             if (isLoggedInView == null || isLoggedInView) {
                 renderLoggedOutView();
             }
-            // Ensure refresh calls for sub-panels are here
             loginPanel.refresh();
             signupPanel.refresh();
             copilotPanel.suggestionPanel.refresh();
@@ -103,7 +101,6 @@ public class MainPanel extends PluginPanel {
         loginPanel.showLoginErrorMessage("");
         signupPanel.showSignupErrorMessage("");
         cardLayout.show(cardPanel, LOGIN_VIEW);
-        // Crucial: Revalidate and repaint the entire main panel after card switch
         revalidate();
         repaint();
         isLoggedInView = false;
@@ -112,7 +109,6 @@ public class MainPanel extends PluginPanel {
     public void renderLoggedInView() {
         updateTopBar(true);
         cardLayout.show(cardPanel, COPILOT_VIEW);
-        // Crucial: Revalidate and repaint the entire main panel after card switch
         revalidate();
         repaint();
         isLoggedInView = true;
@@ -122,7 +118,7 @@ public class MainPanel extends PluginPanel {
         topBarPanel.removeAll();
         JPanel buttonsPanel = new JPanel();
         buttonsPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        int columns = isLoggedIn ? 4 : 3;
+        int columns = isLoggedIn ? 4 : 3; // 4 columns when logged in (Discord, Web, Logout)
         buttonsPanel.setLayout(new GridLayout(1, columns));
 
         JLabel discord = buildTopBarUriButton(UIUtilities.discordIcon,
@@ -137,13 +133,14 @@ public class MainPanel extends PluginPanel {
 
         if (isLoggedIn) {
             BufferedImage icon = ImageUtil.loadImageResource(getClass(), UIUtilities.logoutIcon);
+            // This is the existing logout button; ensure it's correctly wired
             JLabel logout = buildButton(icon, "Log out", () -> {
                 copilotLoginController.onLogout();
-                // When logging out, immediately call renderLoggedOutView for clean state
-                renderLoggedOutView();
+                renderLoggedOutView(); // This already handles reverting to login screen
             });
             buttonsPanel.add(logout);
         }
+
         topBarPanel.add(buttonsPanel, BorderLayout.CENTER);
         topBarPanel.revalidate();
         topBarPanel.repaint();

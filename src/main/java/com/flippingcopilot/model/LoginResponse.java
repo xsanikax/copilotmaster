@@ -12,5 +12,6 @@ public class LoginResponse {
     public String jwt;
 
     @SerializedName("user_id")
-    public int userId;
+    // FIX: Changed type from int to String
+    public String userId;
 }
