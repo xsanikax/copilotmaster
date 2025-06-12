@@ -3,11 +3,8 @@ package com.flippingcopilot.controller;
 import com.flippingcopilot.model.*;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
-import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
-import net.runelite.api.Client;
-import net.runelite.api.VarClientStr;
-import net.runelite.api.Varbits;
+import net.runelite.api.*;
 import net.runelite.api.widgets.ComponentID;
 import net.runelite.api.widgets.Widget;
 
@@ -17,8 +14,6 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.function.Consumer;
 
-import static net.runelite.api.VarPlayer.CURRENT_GE_ITEM;
-
 @Slf4j
 @Getter
 @Singleton
@@ -27,43 +22,40 @@ public class OfferHandler {
 
     private static final int GE_OFFER_INIT_STATE_CHILD_ID = 20;
 
-    // dependencies
     private final Client client;
     private final SuggestionManager suggestionManager;
-    private final ApiRequestHandler apiRequestHandler; // Now uses async methods
+    private final ApiRequestHandler apiRequestHandler;
     private final OsrsLoginManager osrsLoginManager;
     private final OfferManager offerManager;
     private final HighlightController highlightController;
     private final LoginResponseManager loginResponseManager;
 
-    // state
     private String viewedSlotPriceErrorText = null;
 
     public void fetchSlotItemPrice(boolean isViewingSlot) {
         if (isViewingSlot) {
-            var currentItemId = client.getVarpValue(CURRENT_GE_ITEM);
+            var currentItemId = client.getVarpValue(VarPlayer.CURRENT_GE_ITEM);
             offerManager.setViewedSlotItemId(currentItemId);
             if (currentItemId == -1 || currentItemId == 0) return;
 
             var suggestion = suggestionManager.getSuggestion();
             if (suggestion != null && suggestion.getItemId() == currentItemId &&
                     ((Objects.equals(suggestion.getType(), "sell") && isSelling()) ||
-                            Objects.equals(suggestion.getType(), "buy") && isBuying())) {
+                            (Objects.equals(suggestion.getType(), "buy") && isBuying()))) {
                 offerManager.setLastViewedSlotItemId(suggestion.getItemId());
                 offerManager.setLastViewedSlotItemPrice(suggestion.getPrice());
-                offerManager.setLastViewedSlotPriceTime((int) Instant.now().getEpochSecond()); // Corrected field name
+                offerManager.setLastViewedSlotPriceTime((int) Instant.now().getEpochSecond());
                 return;
             }
 
             if (!loginResponseManager.isLoggedIn()) {
                 viewedSlotPriceErrorText = "Login to copilot to see item price.";
-                highlightController.redraw(); // Trigger redraw to show error
+                highlightController.redraw();
                 return;
             }
 
-            // --- FIX: Use asynchronous API call ---
-            viewedSlotPriceErrorText = "Fetching price..."; // Show loading state
-            highlightController.redraw(); // Update UI immediately
+            viewedSlotPriceErrorText = "Fetching price...";
+            highlightController.redraw();
 
             Consumer<ItemPrice> consumer = (fetchedPrice) -> {
                 if (fetchedPrice == null) {
@@ -72,23 +64,39 @@ public class OfferHandler {
                     viewedSlotPriceErrorText = fetchedPrice.getMessage();
                 } else {
                     viewedSlotPriceErrorText = null;
-                    offerManager.setViewedSlotItemPrice(isSelling() ? fetchedPrice.getSellPrice() : fetchedPrice.getBuyPrice());
-                    offerManager.setLastViewedSlotItemId(offerManager.getViewedSlotItemId());
-                    offerManager.setLastViewedSlotItemPrice(offerManager.getViewedSlotItemPrice());
-                    offerManager.setLastViewedSlotPriceTime((int) Instant.now().getEpochSecond()); // Corrected field name
-                    log.debug("fetched item {} price: {}", offerManager.getViewedSlotItemId(), offerManager.getViewedSlotItemPrice());
+                    int priceToSet = isSelling() ? fetchedPrice.getSellPrice() : fetchedPrice.getBuyPrice();
+                    offerManager.setViewedSlotItemPrice(priceToSet);
+                    offerManager.setViewedSlotItemId(currentItemId);
+                    offerManager.setLastViewedSlotPriceTime((int) Instant.now().getEpochSecond());
+                    log.debug("fetched item {} price: {}", currentItemId, priceToSet);
                 }
-                highlightController.redraw(); // Trigger redraw after price is fetched
+                highlightController.redraw();
             };
-
             apiRequestHandler.getItemPriceAsync(currentItemId, osrsLoginManager.getPlayerDisplayName(), consumer);
-
         } else {
             offerManager.setViewedSlotItemPrice(-1);
             offerManager.setViewedSlotItemId(-1);
             viewedSlotPriceErrorText = null;
         }
-        highlightController.redraw(); // Trigger redraw to clear old highlights
+        highlightController.redraw();
+    }
+
+    // FIX: Added this entire method, which is needed by KeybindHandler.java
+    public void setSuggestedAction(Suggestion suggestion) {
+        if (suggestion == null) return;
+        var currentItemId = client.getVarpValue(VarPlayer.CURRENT_GE_ITEM);
+
+        if (isSettingQuantity()) {
+            if (currentItemId == suggestion.getItemId() && getOfferType().equals(suggestion.getType())) {
+                setChatboxValue(suggestion.getQuantity());
+            }
+        } else if (isSettingPrice()) {
+            if (currentItemId == suggestion.getItemId() && getOfferType().equals(suggestion.getType())) {
+                setChatboxValue(suggestion.getPrice());
+            } else if (getViewedSlotPriceErrorText() == null && currentItemId == offerManager.getViewedSlotItemId()) {
+                setChatboxValue(offerManager.getViewedSlotItemPrice());
+            }
+        }
     }
 
     public boolean isSettingQuantity() {
@@ -102,20 +110,18 @@ public class OfferHandler {
         var chatboxTitleWidget = getChatboxTitleWidget();
         if (chatboxTitleWidget == null) return false;
         String chatInputText = chatboxTitleWidget.getText();
-
         var offerTextWidget = getOfferTextWidget();
         if (offerTextWidget == null) return false;
         String offerText = offerTextWidget.getText();
         return chatInputText.equals("Set a price for each item:") && (offerText.equals("Buy offer") || offerText.equals("Sell offer"));
     }
 
-
     private Widget getChatboxTitleWidget() {
         return client.getWidget(ComponentID.CHATBOX_TITLE);
     }
 
     private Widget getOfferTextWidget() {
-        var offerContainerWidget = client.getWidget(ComponentID.GRAND_EXCHANGE_OFFER_DESCRIPTION);
+        var offerContainerWidget = client.getWidget(ComponentID.GRAND_EXCHANGE_OFFER_CONTAINER);
         if (offerContainerWidget == null) return null;
         return offerContainerWidget.getChild(GE_OFFER_INIT_STATE_CHILD_ID);
     }
@@ -138,36 +144,11 @@ public class OfferHandler {
         }
     }
 
-    public void setSuggestedAction(Suggestion suggestion) {
-        var currentItemId = client.getVarpValue(CURRENT_GE_ITEM);
-
-        if (isSettingQuantity()) {
-            if (suggestion == null || currentItemId != suggestion.getItemId()) {
-                return;
-            }
-            setChatboxValue(suggestion.getQuantity());
-        } else if (isSettingPrice()) {
-            int price = -1;
-            if (suggestion == null || currentItemId != suggestion.getItemId()
-                    || !suggestion.getType().equals(getOfferType())) {
-                if (offerManager.getViewedSlotItemId() != currentItemId) {
-                    return;
-                }
-                price = offerManager.getViewedSlotItemPrice();
-            } else {
-                price = suggestion.getPrice();
-            }
-
-            if (price == -1) return;
-
-            setChatboxValue(price);
-        }
-    }
-
     public void setChatboxValue(int value) {
-        var chatboxInputWidget = client.getWidget(ComponentID.CHATBOX_FULL_INPUT);
-        if (chatboxInputWidget == null) return;
-        chatboxInputWidget.setText(value + "*");
         client.setVarcStrValue(VarClientStr.INPUT_TEXT, String.valueOf(value));
+        Widget chatboxInput = client.getWidget(ComponentID.CHATBOX_FULL_INPUT);
+        if (chatboxInput != null) {
+            chatboxInput.setText(value + "*");
+        }
     }
 }

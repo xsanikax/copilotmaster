@@ -1,97 +1,129 @@
 package com.flippingcopilot.model;
 
-import com.google.gson.annotations.SerializedName;
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import lombok.AllArgsConstructor;
-import lombok.Data; // Ensure @Data is imported
-import lombok.Getter; // Explicitly import @Getter for clarity, though @Data includes it
+import lombok.Data;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
-import net.runelite.api.GrandExchangeOfferState;
-
+import net.runelite.api.GrandExchangeOffer;
 import java.time.Instant;
-import java.util.Objects;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 
-@Data // This annotation should generate getters/setters/equals/hashCode
+@Data
 @AllArgsConstructor
 @NoArgsConstructor
-@Getter @Setter // Explicitly declare if @Data isn't enough, though usually it is.
 public class Offer {
-    private String id; // This is the field getId() is for
-    private OfferStatus offerStatus;
+    private OfferStatus status;
     private int itemId;
-    private int price;
     private int quantity;
-    private int slot;
-    private boolean copilotPriceUsed;
-    private Instant time;
-    private int totalQuantity;
-    private boolean wasCopilotSuggestion;
-    private boolean acked;
-
-    // These fields are part of the update method, not direct constructor params
-    private String itemName;
+    private int price;
     private long spent;
-    private int collected;
-    private GrandExchangeOfferState state;
+    private int quantitySold;
+    private long gpToCollect;
+    private Map<Integer, Long> itemsToCollect;
+    private int boxId;
+    private boolean consistent;
+    private boolean login;
 
-
-    // If @Data or @Getter isn't generating it, uncomment this explicit getter:
-    // public String getId() {
-    //     return id;
-    // }
-
-    public boolean isAcked() {
-        return acked;
+    public static Offer getEmptyOffer(int slot) {
+        return new Offer(OfferStatus.EMPTY, 0, 0, 0, 0, 0, 0, new HashMap<>(), slot, true, false);
     }
 
-    public boolean isFreeSlot() {
-        return state == GrandExchangeOfferState.EMPTY || state == GrandExchangeOfferState.CANCELLED_BUY || state == GrandExchangeOfferState.CANCELLED_SELL;
-    }
+    public static Offer fromRunelite(GrandExchangeOffer runeliteOffer, int slot) {
+        Offer offer = new Offer();
+        offer.setStatus(OfferStatus.fromRunelite(runeliteOffer.getState()));
+        offer.setItemId(runeliteOffer.getItemId());
+        offer.setQuantity(runeliteOffer.getTotalQuantity());
+        offer.setPrice(runeliteOffer.getPrice());
+        offer.setSpent(runeliteOffer.getSpent());
+        offer.setQuantitySold(runeliteOffer.getQuantitySold());
+        offer.setBoxId(slot);
 
-    public void update(
-            String itemName, int price, int quantity, long spent, int collected,
-            GrandExchangeOfferState state, Instant time, int totalQuantity,
-            boolean copilotPriceUsed, boolean wasCopilotSuggestion) {
-        this.itemName = itemName;
-        this.price = price;
-        this.quantity = quantity;
-        this.spent = spent;
-        this.collected = collected;
-        this.state = state;
-        this.time = time;
-        this.totalQuantity = totalQuantity;
-        this.copilotPriceUsed = copilotPriceUsed;
-        this.wasCopilotSuggestion = wasCopilotSuggestion;
-    }
+        long itemsToCollect = 0;
+        long gpToCollect = 0;
 
-    @Override
-    public boolean equals(Object obj) {
-        if (this == obj) {
-            return true;
+        switch (runeliteOffer.getState()) {
+            case BOUGHT:
+                itemsToCollect = runeliteOffer.getTotalQuantity();
+                break;
+            case SOLD:
+                gpToCollect = (long) runeliteOffer.getPrice() * runeliteOffer.getQuantitySold();
+                break;
+            case CANCELLED_BUY:
+                itemsToCollect = runeliteOffer.getQuantitySold();
+                gpToCollect = (long) (runeliteOffer.getTotalQuantity() - runeliteOffer.getQuantitySold()) * runeliteOffer.getPrice();
+                break;
+            case CANCELLED_SELL:
+                // FIX: Corrected typo from "runelifeOffer" to "runeliteOffer"
+                itemsToCollect = runeliteOffer.getTotalQuantity() - runeliteOffer.getQuantitySold();
+                gpToCollect = (long) runeliteOffer.getQuantitySold() * runeliteOffer.getPrice();
+                break;
         }
-        if (obj == null || getClass() != obj.getClass()) {
-            return false;
+
+        Map<Integer, Long> itemsMap = new HashMap<>();
+        if (itemsToCollect > 0) {
+            itemsMap.put(offer.getItemId(), itemsToCollect);
         }
-        Offer other = (Offer) obj;
-        return itemId == other.itemId &&
-                price == other.price &&
-                quantity == other.quantity &&
-                slot == other.slot &&
-                copilotPriceUsed == other.copilotPriceUsed &&
-                totalQuantity == other.totalQuantity &&
-                wasCopilotSuggestion == other.wasCopilotSuggestion &&
-                acked == other.acked &&
-                spent == other.spent &&
-                collected == other.collected &&
-                offerStatus == other.offerStatus && // Compare enums
-                state == other.state && // Compare enums
-                Objects.equals(id, other.id) && // Compare String IDs
-                Objects.equals(itemName, other.itemName) && // Compare String item names
-                Objects.equals(time, other.time); // Compare Instant timestamps
+
+        offer.setItemsToCollect(itemsMap);
+        offer.setGpToCollect(gpToCollect);
+        offer.setConsistent(true);
+        offer.setLogin(false);
+
+        return offer;
     }
 
-    @Override
-    public int hashCode() {
-        return Objects.hash(id, offerStatus, itemId, itemName, price, quantity, slot, copilotPriceUsed, time, totalQuantity, wasCopilotSuggestion, acked, spent, collected, state);
+    public long cashStackGpValue() {
+        if (status == OfferStatus.BUY) {
+            return (long) (quantity - quantitySold) * price;
+        }
+        return 0;
+    }
+
+    public Transaction getTransaction(Offer oldOffer) {
+        if (this.equals(oldOffer)) {
+            return null;
+        }
+        int quantityChange = this.quantitySold - oldOffer.quantitySold;
+        long spentChange = this.spent - oldOffer.spent;
+
+        if (quantityChange > 0 && spentChange >= 0) { // Allow 0 spent change for free items
+            return new Transaction(
+                    UUID.randomUUID().toString(),
+                    this.status,
+                    this.itemId,
+                    null,
+                    this.price,
+                    quantityChange,
+                    this.boxId,
+                    (int) spentChange,
+                    Instant.now(),
+                    false,
+                    false,
+                    this.quantity,
+                    this.login,
+                    this.consistent
+            );
+        }
+        return null;
+    }
+
+    // FIX: Added the missing toJson method
+    public JsonObject toJson(Gson gson) {
+        JsonObject jsonObject = new JsonObject();
+        jsonObject.addProperty("status", status.name().toLowerCase());
+        jsonObject.addProperty("item_id", itemId);
+        jsonObject.addProperty("quantity", quantity);
+        jsonObject.addProperty("price", price);
+        jsonObject.addProperty("spent", spent);
+        jsonObject.addProperty("quantity_sold", quantitySold);
+        jsonObject.addProperty("gp_to_collect", gpToCollect);
+        jsonObject.add("items_to_collect", gson.toJsonTree(itemsToCollect));
+        jsonObject.addProperty("box_id", boxId);
+        jsonObject.addProperty("consistent", consistent);
+        jsonObject.addProperty("login", login);
+        return jsonObject;
     }
 }

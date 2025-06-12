@@ -105,32 +105,25 @@ public class FlippingCopilotPlugin extends Plugin {
 		clientToolbar.addNavigation(navButton);
 
 		copilotLoginController.setLoginPanel(mainPanel.loginPanel);
-		// Fix: Explicitly set signupPanel in CopilotLoginController
 		copilotLoginController.setSignupPanel(mainPanel.signupPanel);
 		copilotLoginController.setMainPanel(mainPanel);
 		suggestionController.setCopilotPanel(mainPanel.copilotPanel);
 		suggestionController.setMainPanel(mainPanel);
-		suggestionController.setLoginPanel(mainPanel.loginPanel); // Ensure this is also the V2 version
+		suggestionController.setLoginPanel(mainPanel.loginPanel);
 		suggestionController.setSuggestionPanel(mainPanel.copilotPanel.suggestionPanel);
 		grandExchangeCollectHandler.setSuggestionPanel(mainPanel.copilotPanel.suggestionPanel);
 		statsPanel = mainPanel.copilotPanel.statsPanel;
 
 		mainPanel.refresh();
-		if(loginResponseManager.isLoggedIn()) {
-			flipManager.loadFlipsAsync();
-		}
-		if(osrsLoginManager.getInvalidStateDisplayMessage() == null) {
-			flipManager.setIntervalDisplayName(osrsLoginManager.getPlayerDisplayName());
-			flipManager.setIntervalStartTime(sessionManager.getCachedSessionData().startTime);
-		}
+
 		executorService.scheduleAtFixedRate(() ->
 						clientThread.invoke(() -> {
 							boolean loginValid = osrsLoginManager.isValidLoginState();
 							if (loginValid) {
 								AccountStatus accStatus = accountStatusManager.getAccountStatus();
 								boolean isFlipping = accStatus != null && accStatus.currentlyFlipping();
-								long cashStack = accStatus == null ? 0 : accStatus.currentCashStack();
-								if(sessionManager.updateSessionStats(isFlipping, cashStack)) {
+								long cashStack = (accStatus == null || accStatus.getInventory() == null) ? 0 : accStatus.getInventory().getTotalGp();
+								if (sessionManager.updateSessionStats(isFlipping, cashStack)) {
 									mainPanel.copilotPanel.statsPanel.refresh(false, loginResponseManager.isLoggedIn() && osrsLoginManager.isValidLoginState());
 								}
 							}
@@ -143,9 +136,11 @@ public class FlippingCopilotPlugin extends Plugin {
 		offerManager.saveAll();
 		highlightController.removeAll();
 		clientToolbar.removeNavigation(navButton);
-		if(loginResponseManager.isLoggedIn()) {
+		if (loginResponseManager.isLoggedIn()) {
 			String displayName = osrsLoginManager.getLastDisplayName();
-			webHookController.sendMessage(flipManager.calculateStats(sessionManager.getCachedSessionData().startTime, displayName), sessionManager.getCachedSessionData(), displayName, false);
+			if (displayName != null) {
+				webHookController.sendMessage(flipManager.calculateStats(sessionManager.getCachedSessionData().startTime, displayName), sessionManager.getCachedSessionData(), displayName, false);
+			}
 		}
 		keybindHandler.unregister();
 	}
@@ -155,7 +150,6 @@ public class FlippingCopilotPlugin extends Plugin {
 		return configManager.getConfig(FlippingCopilotConfig.class);
 	}
 
-	//---------------------------- Event Handlers ----------------------------//
 	@Subscribe
 	public void onGrandExchangeOfferChanged(GrandExchangeOfferChanged event) {
 		offerEventHandler.onGrandExchangeOfferChanged(event);
@@ -208,8 +202,7 @@ public class FlippingCopilotPlugin extends Plugin {
 
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event) {
-		switch (event.getGameState())
-		{
+		switch (event.getGameState()) {
 			case LOGIN_SCREEN:
 				sessionManager.reset();
 				suggestionManager.reset();
@@ -230,17 +223,21 @@ public class FlippingCopilotPlugin extends Plugin {
 						return true;
 					}
 					final String name = osrsLoginManager.getPlayerDisplayName();
-					if(name == null) {
+					if (name == null) {
 						return false;
 					}
+
+					if (loginResponseManager.isLoggedIn()) {
+						flipManager.loadFlipsAsync();
+						transactionManger.scheduleSyncIn(0, name);
+					}
+
 					statsPanel.resetIntervalDropdownToSession();
 					flipManager.setIntervalDisplayName(name);
 					flipManager.setIntervalStartTime(sessionManager.getCachedSessionData().startTime);
-					statsPanel.refresh(true, loginResponseManager.isLoggedIn()  && osrsLoginManager.isValidLoginState());
+					statsPanel.refresh(true, loginResponseManager.isLoggedIn() && osrsLoginManager.isValidLoginState());
 					mainPanel.refresh();
-					if(loginResponseManager.isLoggedIn()) {
-						transactionManger.scheduleSyncIn(0, name);
-					}
+
 					return true;
 				});
 		}
@@ -255,9 +252,11 @@ public class FlippingCopilotPlugin extends Plugin {
 	public void onClientShutdown(ClientShutdown clientShutdownEvent) {
 		log.debug("client shutdown event received");
 		offerManager.saveAll();
-		if(loginResponseManager.isLoggedIn()) {
+		if (loginResponseManager.isLoggedIn()) {
 			String displayName = osrsLoginManager.getLastDisplayName();
-			webHookController.sendMessage(flipManager.calculateStats(sessionManager.getCachedSessionData().startTime, displayName), sessionManager.getCachedSessionData(), displayName, false);
+			if (displayName != null) {
+				webHookController.sendMessage(flipManager.calculateStats(sessionManager.getCachedSessionData().startTime, displayName), sessionManager.getCachedSessionData(), displayName, false);
+			}
 		}
 		keybindHandler.unregister();
 	}

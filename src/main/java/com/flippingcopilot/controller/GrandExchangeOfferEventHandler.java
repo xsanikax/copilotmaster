@@ -7,19 +7,13 @@ import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import javax.inject.Inject;
 import javax.inject.Singleton;
-
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import net.runelite.api.Client;
-import net.runelite.api.GameState;
-import net.runelite.api.GrandExchangeOffer;
-import net.runelite.api.GrandExchangeOfferState;
-import net.runelite.api.ItemComposition; // Import ItemComposition
+import net.runelite.api.*;
 import net.runelite.api.events.GrandExchangeOfferChanged;
 import net.runelite.client.callback.ClientThread;
-import net.runelite.client.game.ItemManager; // Import ItemManager
+import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.overlay.OverlayManager;
-
 import static com.flippingcopilot.model.OsrsLoginManager.GE_LOGIN_BURST_WINDOW;
 
 @Slf4j
@@ -27,25 +21,21 @@ import static com.flippingcopilot.model.OsrsLoginManager.GE_LOGIN_BURST_WINDOW;
 @RequiredArgsConstructor(onConstructor_ = @Inject)
 public class GrandExchangeOfferEventHandler {
 
-    // dependencies
     private final Client client;
-    private final OfferManager offerPersistence;
+    private final OfferManager offerManager;
     private final GrandExchange grandExchange;
     private final TransactionManger transactionManager;
     private final OsrsLoginManager osrsLoginManager;
     private final OverlayManager overlayManager;
     private final GrandExchangeUncollectedManager grandExchangeUncollectedManager;
-    private final OfferManager offerManager;
     private final SuggestionManager suggestionManager;
-    private final ItemManager itemManager; // Ensure ItemManager is injected here
+    private final ItemManager itemManager;
     private final ClientThread clientThread;
 
-
-    // state
     private final Queue<Transaction> transactionsToProcess = new ConcurrentLinkedQueue<>();
 
     public void onGameTick() {
-        if(!transactionsToProcess.isEmpty()) {
+        if (!transactionsToProcess.isEmpty()) {
             processTransactions();
         }
     }
@@ -56,163 +46,144 @@ public class GrandExchangeOfferEventHandler {
         Long accountHash = client.getAccountHash();
 
         if (offer.getState() == GrandExchangeOfferState.EMPTY && client.getGameState() != GameState.LOGGED_IN) {
-            // Trades are cleared by the client during LOGIN_SCREEN/HOPPING/LOGGING_IN, ignore those
             return;
         }
 
         log.debug("tick {} GE offer updated: state: {}, slot: {}, item: {}, qty: {}, lastLoginTick: {}", client.getTickCount(), offer.getState(), slot, offer.getItemId(), offer.getQuantitySold(), osrsLoginManager.getLastLoginTick());
 
-        SavedOffer o = SavedOffer.fromGrandExchangeOffer(offer);
+        SavedOffer currentOffer = SavedOffer.fromGrandExchangeOffer(offer);
+        SavedOffer prevOffer = offerManager.loadOffer(accountHash, slot);
 
-        SavedOffer prev = offerPersistence.loadOffer(accountHash, slot);
-
-        if(Objects.equals(o, prev)) {
-            log.debug("skipping duplicate offer event {}", o);
+        if (Objects.equals(currentOffer, prevOffer)) {
+            log.debug("skipping duplicate offer event {}", currentOffer);
             return;
         }
 
-        o.setCopilotPriceUsed(wasCopilotPriceUsed(o, prev));
-        o.setWasCopilotSuggestion(wasCopilotSuggestion(o, prev));
+        currentOffer.setCopilotPriceUsed(wasCopilotPriceUsed(currentOffer, prevOffer));
+        currentOffer.setWasCopilotSuggestion(wasCopilotSuggestion(currentOffer, prevOffer));
 
-        boolean consistent = isConsistent(prev, o);
-        if(!consistent) {
+        boolean consistent = isConsistent(prevOffer, currentOffer);
+        if (!consistent) {
             log.warn("offer on slot {} is inconsistent with previous saved offer", slot);
         }
 
-        if(hasSlotBecomeFree(o, prev, consistent)) {
+        if (hasSlotBecomeFree(currentOffer, prevOffer, consistent)) {
             suggestionManager.setSuggestionNeeded(true);
         }
 
-        Transaction t = inferTransaction(slot, o, prev, consistent);
-        if(t != null) {
+        Transaction t = inferTransaction(slot, currentOffer, prevOffer);
+        if (t != null) {
+            t.setConsistent(consistent);
+            t.setLogin(client.getTickCount() <= osrsLoginManager.getLastLoginTick() + GE_LOGIN_BURST_WINDOW);
             transactionsToProcess.add(t);
-            processTransactions();
-            suggestionManager.setSuggestionNeeded(true);
-            log.debug("inferred transaction {}", t);
         }
-        updateUncollected(accountHash, slot, o, prev, consistent);
-        offerPersistence.saveOffer(accountHash, slot, o);
-    }
-
-    private boolean hasSlotBecomeFree(SavedOffer offer, SavedOffer prev, boolean consistent) {
-        return offer.isFreeSlot() && (prev == null || !consistent || !prev.isFreeSlot());
-    }
-
-    private boolean wasCopilotPriceUsed(SavedOffer o, SavedOffer prev) {
-        if(isNewOffer(prev, o)){
-            return o.getItemId() == offerManager.getLastViewedSlotItemId() && o.getPrice() == offerManager.getLastViewedSlotItemPrice() && Instant.now().minusSeconds(30).getEpochSecond() < offerManager.getLastViewedSlotPriceTime();
-        } else {
-            return prev.isCopilotPriceUsed();
-        }
-    }
-
-    private boolean wasCopilotSuggestion(SavedOffer o, SavedOffer prev) {
-        if(isNewOffer(prev, o)){
-            return o.getItemId() == suggestionManager.getSuggestionItemIdOnOfferSubmitted() && o.getOfferStatus().equals(suggestionManager.getSuggestionOfferStatusOnOfferSubmitted());
-        } else {
-            return prev.isWasCopilotSuggestion();
-        }
-    }
-
-    private void updateUncollected(Long accountHash, int slot, SavedOffer o, SavedOffer prev, boolean consistent) {
-        if(!consistent) {
-            return;
-        }
-        int uncollectedGp = 0;
-        int uncollectedItems = 0;
-        switch (o.getState()) {
-            case BUYING:
-            case BOUGHT:
-                uncollectedItems = isNewOffer(prev, o) ? o.getQuantitySold() : o.getQuantitySold() - prev.getQuantitySold();
-                break;
-            case SOLD:
-            case SELLING:
-                uncollectedGp = (isNewOffer(prev, o) ? o.getQuantitySold() : o.getQuantitySold() - prev.getQuantitySold()) * o.getPrice();
-                break;
-            case CANCELLED_BUY:
-                uncollectedGp = (o.getTotalQuantity() - o.getQuantitySold()) * o.getPrice();
-                break;
-            case CANCELLED_SELL:
-                uncollectedItems = o.getTotalQuantity() - o.getQuantitySold();
-                break;
-            case EMPTY:
-                // if the slot is empty we want to ensure that the un collected manager doesn't think there is something to collect
-                // this can happen due to race conditions between the collection and offer fills timing
-                grandExchangeUncollectedManager.ensureSlotClear(accountHash, slot);
-                suggestionManager.setSuggestionNeeded(true);
-                return;
-        }
-        grandExchangeUncollectedManager.addUncollected(accountHash, slot, o.getItemId(), uncollectedItems, uncollectedGp);
-
+        updateUncollected(accountHash, slot, currentOffer, prevOffer, consistent);
+        offerManager.saveOffer(accountHash, slot, currentOffer);
     }
 
     private void processTransactions() {
         String displayName = osrsLoginManager.getPlayerDisplayName();
-        if(displayName != null) {
+        if (displayName != null) {
             Transaction transaction;
             while ((transaction = transactionsToProcess.poll()) != null) {
-                transactionManager.addTransaction(transaction, displayName);
-                // GpDropOverlay removed here to fix previous compile issues.
-                // Re-add if needed, ensuring it gets profit value.
+                long profit = transactionManager.addTransaction(transaction, displayName);
+                if (profit != 0) {
+                    new GpDropOverlay(overlayManager, client, profit, transaction.getBoxId());
+                }
             }
         }
     }
 
-    public Transaction inferTransaction(int slot, SavedOffer offer, SavedOffer prev, boolean consistent) {
-        boolean login = client.getTickCount() <= osrsLoginManager.getLastLoginTick() + GE_LOGIN_BURST_WINDOW;
-        boolean isNewOffer = isNewOffer(prev, offer);
-        int quantityDiff = isNewOffer ? offer.getQuantitySold() : offer.getQuantitySold() - prev.getQuantitySold();
-        int amountSpentDiff = isNewOffer ? offer.getSpent() : offer.getSpent() - prev.getSpent();
-        if (quantityDiff > 0 && amountSpentDiff > 0) {
-            ItemComposition itemComposition = itemManager.getItemComposition(offer.getItemId()); // Get item name
-            String itemName = (itemComposition != null) ? itemComposition.getName() : "Unknown Item"; // Default if not found
+    private boolean wasCopilotPriceUsed(SavedOffer current, SavedOffer prev) {
+        if (isNewOffer(prev, current)) {
+            return current.getItemId() == offerManager.getViewedSlotItemId() && current.getPrice() == offerManager.getViewedSlotItemPrice() && Instant.now().minusSeconds(30).isBefore(Instant.ofEpochSecond(offerManager.getLastViewedSlotPriceTime()));
+        }
+        return prev != null && prev.isCopilotPriceUsed();
+    }
 
-            Transaction t = new Transaction(
-                    offer.getId(),
+    private boolean wasCopilotSuggestion(SavedOffer current, SavedOffer prev) {
+        if (isNewOffer(prev, current)) {
+            return current.getItemId() == suggestionManager.getSuggestionItemIdOnOfferSubmitted() && current.getOfferStatus().equals(suggestionManager.getSuggestionOfferStatusOnOfferSubmitted());
+        }
+        return prev != null && prev.isWasCopilotSuggestion();
+    }
+
+    private void updateUncollected(Long accountHash, int slot, SavedOffer current, SavedOffer prev, boolean consistent) {
+        if (!consistent || prev == null) {
+            return;
+        }
+        // FIX: Change uncollectedGp to a long to prevent lossy conversion
+        long uncollectedGp = 0;
+        int uncollectedItems = 0;
+        int quantityChange = current.getQuantitySold() - prev.getQuantitySold();
+
+        if (quantityChange > 0) {
+            if (current.getOfferStatus() == OfferStatus.BUY) {
+                uncollectedItems = quantityChange;
+            } else if (current.getOfferStatus() == OfferStatus.SELL) {
+                uncollectedGp = (long) quantityChange * current.getPrice();
+            }
+        }
+
+        switch (current.getState()) {
+            case CANCELLED_BUY:
+                uncollectedGp = (long) (current.getTotalQuantity() - current.getQuantitySold()) * current.getPrice();
+                break;
+            case CANCELLED_SELL:
+                uncollectedItems = current.getTotalQuantity() - current.getQuantitySold();
+                break;
+            case EMPTY:
+                grandExchangeUncollectedManager.ensureSlotClear(accountHash, slot);
+                return;
+        }
+
+        if (uncollectedItems > 0 || uncollectedGp > 0) {
+            grandExchangeUncollectedManager.addUncollected(accountHash, slot, current.getItemId(), uncollectedItems, uncollectedGp);
+        }
+    }
+
+    public Transaction inferTransaction(int slot, SavedOffer offer, SavedOffer prev) {
+        if (prev == null) return null;
+        int quantityDiff = offer.getQuantitySold() - prev.getQuantitySold();
+        long amountSpentDiff = offer.getSpent() - prev.getSpent();
+
+        if (quantityDiff > 0 && amountSpentDiff >= 0) {
+            ItemComposition itemComposition = itemManager.getItemComposition(offer.getItemId());
+            String itemName = (itemComposition != null) ? itemComposition.getName() : "Unknown Item";
+
+            return new Transaction(
+                    UUID.randomUUID().toString(),
                     offer.getOfferStatus(),
                     offer.getItemId(),
-                    itemName, // NEW: Set item name here
+                    itemName,
                     offer.getPrice(),
                     quantityDiff,
                     slot,
-                    amountSpentDiff,
+                    (int) amountSpentDiff,
                     Instant.now(),
                     offer.isCopilotPriceUsed(),
                     offer.isWasCopilotSuggestion(),
                     offer.getTotalQuantity(),
-                    false, // login
-                    true // consistent
+                    false,
+                    true
             );
-            return t;
         }
         return null;
     }
 
     private boolean isConsistent(SavedOffer prev, SavedOffer updated) {
-        if(prev == null) {
-            return false;
-        }
-        if(updated.getState() == GrandExchangeOfferState.EMPTY) {
-            return true;
-        }
-        if(prev.getState() == GrandExchangeOfferState.EMPTY && !(updated.getState() == GrandExchangeOfferState.CANCELLED_BUY || updated.getState() == GrandExchangeOfferState.CANCELLED_SELL)) {
-            return true;
-        }
-        return prev.getOfferStatus() == updated.getOfferStatus() ||
-                prev.getItemId() == updated.getItemId()
-                || prev.getPrice() == updated.getPrice()
-                || prev.getTotalQuantity() == updated.getTotalQuantity();
+        if (prev == null) return true;
+        if (updated.getState() == GrandExchangeOfferState.EMPTY) return true;
+        return prev.getItemId() == updated.getItemId() &&
+                prev.getPrice() == updated.getPrice() &&
+                prev.getTotalQuantity() == updated.getTotalQuantity();
     }
 
     private boolean isNewOffer(SavedOffer prev, SavedOffer updated) {
-        if (prev == null) {
-            return true;
-        }
-        return prev.getOfferStatus() != updated.getOfferStatus() ||
-                prev.getItemId() != updated.getItemId()
-                || prev.getPrice() != updated.getPrice()
-                || prev.getTotalQuantity() != updated.getTotalQuantity()
-                || prev.getQuantitySold() > updated.getQuantitySold()
-                || prev.getSpent() > updated.getSpent();
+        return prev == null || isConsistent(prev, updated) == false;
+    }
+
+    private boolean hasSlotBecomeFree(SavedOffer offer, SavedOffer prev, boolean consistent) {
+        return offer.isFreeSlot() && (prev == null || !consistent || !prev.isFreeSlot());
     }
 }

@@ -9,7 +9,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
-
 public class StatusOfferList extends ArrayList<Offer> {
     public static final int NUM_SLOTS = 8;
 
@@ -33,7 +32,8 @@ public class StatusOfferList extends ArrayList<Offer> {
                 && !emptySlotExists();
     }
 
-    boolean emptySlotExists() {
+    // FIX: Changed from package-private to public
+    public boolean emptySlotExists() {
         return stream().anyMatch(offer -> offer.getStatus() == OfferStatus.EMPTY);
     }
 

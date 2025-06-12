@@ -32,7 +32,7 @@ import static com.flippingcopilot.util.Constants.MIN_GP_NEEDED_TO_FLIP;
 @Slf4j
 public class SuggestionPanel extends JPanel {
 
-    // dependencies
+    //... (all existing fields)
     private final FlippingCopilotConfig config;
     private final SuggestionManager suggestionManager;
     private final AccountStatusManager accountStatusManager;
@@ -67,7 +67,7 @@ public class SuggestionPanel extends JPanel {
     @Setter
     private String serverMessage = "";
 
-
+    //... (existing constructor)
     @Inject
     public SuggestionPanel(FlippingCopilotConfig config,
                            SuggestionManager suggestionManager,
@@ -99,21 +99,18 @@ public class SuggestionPanel extends JPanel {
         this.priceGraphController = priceGraphController;
         this.premiumInstanceController = premiumInstanceController;
 
-        // Create the layered pane first
-        layeredPane.setLayout(null);  // LayeredPane needs null layout
+        layeredPane.setLayout(null);
 
-        // Create a main panel that will hold all the regular components
         suggestedActionPanel = new JPanel(new BorderLayout());
         suggestedActionPanel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
         suggestedActionPanel.setBorder(BorderFactory.createEmptyBorder(10, 15, 10, 15));
-        suggestedActionPanel.setBounds(0, 0, 300, 150);  // Set appropriate size
+        suggestedActionPanel.setBounds(0, 0, 300, 150);
         JLabel title = new JLabel("<html><center> <FONT COLOR=white><b>Suggested Action:" +
                 "</b></FONT></center></html>");
         title.setHorizontalAlignment(SwingConstants.CENTER);
         suggestedActionPanel.add(title, BorderLayout.NORTH);
 
-        JPanel suggestionContainer = new JPanel();
-        suggestionContainer.setLayout(new CardLayout());
+        JPanel suggestionContainer = new JPanel(new CardLayout());
         suggestionContainer.setOpaque(true);
         suggestionContainer.setBackground(ColorScheme.DARKER_GRAY_COLOR);
         suggestionContainer.setPreferredSize(new Dimension(0, 85));
@@ -139,57 +136,29 @@ public class SuggestionPanel extends JPanel {
         setupButtonContainer();
         suggestedActionPanel.add(buttonContainer, BorderLayout.SOUTH);
 
-
         layeredPane.add(suggestedActionPanel, JLayeredPane.DEFAULT_LAYER);
 
-        // Build the suggestion preferences panel:
         this.preferencesPanel.setVisible(false);
         layeredPane.add(this.preferencesPanel, JLayeredPane.DEFAULT_LAYER);
 
-        // Create and add the gear button
         BufferedImage gearIcon = ImageUtil.loadImageResource(getClass(), "/preferences-icon.png");
         gearIcon = ImageUtil.resizeImage(gearIcon, 20, 20);
         BufferedImage recoloredIcon = ImageUtil.recolorImage(gearIcon, ColorScheme.LIGHT_GRAY_COLOR);
-        gearButton = buildButton(recoloredIcon, "Settings", () -> {});
+        gearButton = buildButton(recoloredIcon, "Settings", this::handleGearClick);
         gearButton.setEnabled(true);
         gearButton.setFocusable(true);
         gearButton.setBackground(ColorScheme.DARKER_GRAY_COLOR);
         gearButton.setOpaque(true);
-        ImageIcon iconOff = new ImageIcon(recoloredIcon);
-        ImageIcon iconOn = new ImageIcon(ImageUtil.luminanceScale(recoloredIcon, BUTTON_HOVER_LUMINANCE));
-        // Replace the existing gear button MouseAdapter with this implementation
-        gearButton.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                if (!SwingUtilities.isEventDispatchThread()) {
-                    SwingUtilities.invokeLater(() -> handleGearClick());
-                    return;
-                }
-                handleGearClick();
-            }
 
-            @Override
-            public void mouseEntered(MouseEvent e) {
-                gearButton.setIcon(iconOn);
-            }
-
-            @Override
-            public void mouseExited(MouseEvent e) {
-                gearButton.setIcon(iconOff);
-            }
-        });
         gearButton.setOpaque(true);
         gearButton.setBounds(5, 5, 20, 20);
         layeredPane.add(gearButton, JLayeredPane.PALETTE_LAYER);
 
-        // Set up the main panel
         setLayout(new BorderLayout());
         setBackground(ColorScheme.DARKER_GRAY_COLOR);
         setPreferredSize(new Dimension(0, 150));
-
         add(layeredPane);
 
-        // Add a component listener to handle resizing
         addComponentListener(new ComponentAdapter() {
             @Override
             public void componentResized(ComponentEvent e) {
@@ -200,13 +169,13 @@ public class SuggestionPanel extends JPanel {
         });
     }
 
-    // Add this as a private method in the class
+    // FIX: Added the missing method
+    public boolean isCollectItemsSuggested() {
+        return "Collect items".equals(innerSuggestionMessage);
+    }
+
+    //... (all other existing methods: setupButtonContainer, handleGearClick, etc.)
     private void handleGearClick() {
-//        Data data = getPriceData();
-//
-//        Manager.showPriceGraph(graphButton, data);
-
-
         isPreferencesPanelVisible = !isPreferencesPanelVisible;
         preferencesPanel.setVisible(isPreferencesPanelVisible);
         suggestedActionPanel.setVisible(!isPreferencesPanelVisible);
@@ -218,10 +187,10 @@ public class SuggestionPanel extends JPanel {
     private void setupButtonContainer() {
         buttonContainer.setLayout(new BorderLayout());
         buttonContainer.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-    
+
         JPanel centerPanel = new JPanel(new GridLayout(1, 5, 15, 0));
         centerPanel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-    
+
         BufferedImage graphIcon = ImageUtil.loadImageResource(getClass(), "/graph.png");
         graphButton = buildButton(graphIcon, "Price graph", () -> {
             if(config.priceGraphWebsite().equals(FlippingCopilotConfig.PriceGraphWebsite.FLIPPING_COPILOT)) {
@@ -234,13 +203,13 @@ public class SuggestionPanel extends JPanel {
             }
         });
         centerPanel.add(graphButton);
-    
+
         JPanel emptyPanel = new JPanel();
         emptyPanel.setOpaque(false);
         centerPanel.add(emptyPanel);
         centerPanel.add(pauseButton);
         centerPanel.add(blockButton);
-    
+
         BufferedImage skipIcon = ImageUtil.loadImageResource(getClass(), "/skip.png");
         skipButton = buildButton(skipIcon, "Skip suggestion", () -> {
             showLoading();
@@ -249,10 +218,9 @@ public class SuggestionPanel extends JPanel {
             suggestionManager.setSuggestionNeeded(true);
         });
         centerPanel.add(skipButton);
-        
+
         buttonContainer.add(centerPanel, BorderLayout.CENTER);
     }
-
 
     private void setItemIcon(int itemId) {
         AsyncBufferedImage image = itemManager.getImage(itemId);
@@ -261,7 +229,6 @@ public class SuggestionPanel extends JPanel {
             suggestionIcon.setVisible(true);
         }
     }
-
 
     public void updateSuggestion(Suggestion suggestion) {
         NumberFormat formatter = NumberFormat.getNumberInstance();
@@ -310,8 +277,8 @@ public class SuggestionPanel extends JPanel {
         NumberFormat formatter = NumberFormat.getNumberInstance();
         setMessage("Add " +
                 "at least <FONT COLOR=" + highlightedColor + ">" + formatter.format(MIN_GP_NEEDED_TO_FLIP)
-                               + "</FONT> gp<br>to your inventory<br>"
-                               + "to get a flip suggestion");
+                + "</FONT> gp<br>to your inventory<br>"
+                + "to get a flip suggestion");
         setButtonsVisible(false);
     }
 
@@ -330,14 +297,11 @@ public class SuggestionPanel extends JPanel {
         innerSuggestionMessage = message;
         setButtonsVisible(false);
 
-        // Check if message contains "<manage>"
         String displayMessage = message;
         if (message != null && message.contains("<manage>")) {
-            // Replace <manage> with a styled link
             displayMessage = message.replace("<manage>",
                     "<a href='#' style='text-decoration:underline'>manage</a>");
 
-            // Add mouse listener if not already present
             boolean hasListener = false;
             for (MouseListener listener : suggestionText.getMouseListeners()) {
                 if (listener instanceof ManageClickListener) {
@@ -348,7 +312,6 @@ public class SuggestionPanel extends JPanel {
 
             if (!hasListener) {
                 suggestionText.addMouseListener(new ManageClickListener());
-                // Make the label show a hand cursor when hovering over it
                 suggestionText.setCursor(new Cursor(Cursor.HAND_CURSOR));
             }
         } else {
@@ -359,7 +322,6 @@ public class SuggestionPanel extends JPanel {
         suggestionTextContainer.revalidate();
         suggestionTextContainer.repaint();
     }
-
     private class ManageClickListener extends MouseAdapter {
         @Override
         public void mouseClicked(MouseEvent e) {
@@ -368,10 +330,6 @@ public class SuggestionPanel extends JPanel {
                 premiumInstanceController.loadAndOpenPremiumInstanceDialog();
             }
         }
-    }
-
-    public boolean isCollectItemsSuggested() {
-        return suggestionText.isVisible() && "Collect items".equals(innerSuggestionMessage);
     }
 
     public void showLoading() {
@@ -411,7 +369,7 @@ public class SuggestionPanel extends JPanel {
         }
         if (collectNeeded) {
             suggestCollect();
-        } else if(suggestion.getType().equals("wait") && !grandExchange.isOpen() && accountStatus.emptySlotExists()) {
+        } else if(suggestion.getType().equals("wait") && !grandExchange.isOpen() && accountStatus.getOffers().emptySlotExists()) {
             suggestOpenGe();
         }else if (suggestion.getType().equals("wait") && accountStatus.moreGpNeeded()) {
             suggestAddGp();
@@ -424,7 +382,6 @@ public class SuggestionPanel extends JPanel {
     public void refresh() {
         log.debug("refreshing suggestion panel {}", client.getGameState());
         if(!SwingUtilities.isEventDispatchThread()) {
-            // we always execute this in the Swing EDT thread
             SwingUtilities.invokeLater(this::refresh);
             return;
         }

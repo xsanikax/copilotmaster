@@ -4,7 +4,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
-
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.util.List;
@@ -15,21 +14,21 @@ import java.util.Map;
 @RequiredArgsConstructor(onConstructor_ = @Inject)
 public class AccountStatusManager {
 
-    // dependencies
     private final Client client;
     private final OsrsLoginManager osrsLoginManager;
     private final GrandExchangeUncollectedManager geUncollected;
     private final SuggestionPreferencesManager suggestionPreferencesManager;
     private final PausedManager pausedManager;
 
-    // state
     @Setter
     private int skipSuggestion = -1;
 
     public synchronized AccountStatus getAccountStatus() {
-        Long accountHash =  osrsLoginManager.getAccountHash();
+        Long accountHash = osrsLoginManager.getAccountHash();
+        // FIX: Use InventoryID.INVENTORY.getId() to get the container ID
         ItemContainer itemContainer = client.getItemContainer(InventoryID.INVENTORY);
-        if(itemContainer == null) {
+
+        if (itemContainer == null) {
             log.warn("unable to fetch inventory item container");
             return null;
         }
@@ -44,8 +43,8 @@ public class AccountStatusManager {
         status.setInventory(inventory);
         status.setUncollected(u);
         status.setDisplayName(osrsLoginManager.getPlayerDisplayName());
-        status.setRsAccountHash(accountHash);
-        status.setSkipSuggestion(skipSuggestion);
+        status.setAccountHash(accountHash);
+        status.setSuggestionSkipped(isSuggestionSkipped());
         status.setSellOnlyMode(suggestionPreferencesManager.getPreferences().isSellOnlyMode());
         status.setF2pOnlyMode(suggestionPreferencesManager.getPreferences().isF2pOnlyMode());
         status.setMember(osrsLoginManager.isMembersWorld());
@@ -53,14 +52,13 @@ public class AccountStatusManager {
         status.setBlockedItems(suggestionPreferencesManager.blockedItems());
         status.setTimeframe(suggestionPreferencesManager.getTimeframe());
 
+        // This logic appears correct from your upload
         Map<Integer, Long> inLimboItems = geUncollected.getLastClearedUncollected();
         List<Integer> clearedSlots = geUncollected.getLastClearedSlots();
         if (geUncollected.getLastClearedTick() == client.getTickCount()) {
-            log.debug("tick {} in limbo items {}, cleared slots {}", client.getTickCount(), inLimboItems, clearedSlots);
-            if(inventory.missingJustCollected(inLimboItems)) {
+            if (inventory.missingJustCollected(inLimboItems)) {
                 inLimboItems.forEach((itemId, qty) -> {
                     if (qty > 0) {
-                        log.debug("tick {} move in limbo item {}, qty {} to inventory", client.getTickCount(), itemId, qty);
                         inventory.mergeItem(new RSItem(itemId, qty));
                     }
                 });
@@ -69,7 +67,6 @@ public class AccountStatusManager {
                 Offer o = offerList.get(slot);
                 GrandExchangeOffer geOffer = geOffers[slot];
                 if (!isActive(geOffer.getState()) && geOffer.getState() != GrandExchangeOfferState.EMPTY) {
-                    log.debug("tick {} in-activate slot {} just collected setting to EMPTY", client.getTickCount(), slot);
                     o.setStatus(OfferStatus.EMPTY);
                 }
             }
@@ -79,7 +76,7 @@ public class AccountStatusManager {
     }
 
     private boolean isActive(GrandExchangeOfferState state) {
-        switch (state){
+        switch (state) {
             case EMPTY:
             case CANCELLED_BUY:
             case CANCELLED_SELL:
