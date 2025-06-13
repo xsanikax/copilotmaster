@@ -1,11 +1,11 @@
-# Flipping Copilot
+# Beagle Flipper
 
 [![Discord](https://img.shields.io/discord/1208453764630057010.svg)](https://discord.gg/UyQxA4QJAq)
 
-Flipping Copilot is an AI-powered assistant designed to enhance your trading experience in Old School RuneScape. With its advanced algorithms and market analysis, Flipping Copilot provides intelligent suggestions on which items to flip, optimal prices and quantities for buying and selling, and when to cancel existing offers to maximize your profit per hour.
+Beagle Flipper is an AI-powered assistant designed to enhance your trading experience in Old School RuneScape. With its advanced algorithms and market analysis, Beagle Flipper provides intelligent suggestions on which items to flip, optimal prices and quantities for buying and selling, and when to cancel existing offers to maximize your profit per hour.
 
 ## Community
-Join our [Discord server](https://discord.gg/UyQxA4QJAq) to engage with fellow users, discuss the project, ask questions, and receive support. Our community is dedicated to helping you make the most of Flipping Copilot and enhancing your trading experience in Old School RuneScape.
+Join our [Discord server](https://discord.gg/UyQxA4QJAq) to engage with fellow users, discuss the project, ask questions, and receive support. Our community is dedicated to helping you make the most of Beagle Flipper and enhancing your trading experience in Old School RuneScape.
 
 
 ## Features
@@ -16,7 +16,7 @@ Join our [Discord server](https://discord.gg/UyQxA4QJAq) to engage with fellow u
  - Cross-device flip tracking
  - Price graphs, stats and more!
 
-![image info](./images/flipping-copilot-ui.png)
+![image info](./images/beagle-flipper-ui.png)
 
 ![image info](./images/price-graph.png)
 

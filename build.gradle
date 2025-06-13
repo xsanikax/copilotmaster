@@ -27,7 +27,7 @@ dependencies {
 }
 
 
-group = 'com.flippingcopilot'
+group = 'com.beagleflipper'
 version = '1.7.0'
 
 tasks.withType(JavaCompile) {
