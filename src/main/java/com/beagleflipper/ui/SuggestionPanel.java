@@ -32,7 +32,6 @@ import static com.beagleflipper.util.Constants.MIN_GP_NEEDED_TO_FLIP;
 @Slf4j
 public class SuggestionPanel extends JPanel {
 
-    //... (all existing fields)
     private final BeagleFlipperConfig config;
     private final SuggestionManager suggestionManager;
     private final AccountStatusManager accountStatusManager;
@@ -50,7 +49,7 @@ public class SuggestionPanel extends JPanel {
     private final PremiumInstanceController premiumInstanceController;
 
     private final JLabel suggestionText = new JLabel();
-    private final JLabel suggestionIcon = new JLabel(new ImageIcon(ImageUtil.loadImageResource(getClass(),"/small_open_arrow.png")));
+    private final JLabel suggestionIcon = new JLabel();
     private final JPanel suggestionTextContainer = new JPanel();
     public final Spinner spinner = new Spinner();
     private JLabel skipButton;
@@ -67,7 +66,7 @@ public class SuggestionPanel extends JPanel {
     @Setter
     private String serverMessage = "";
 
-    //... (existing constructor)
+
     @Inject
     public SuggestionPanel(BeagleFlipperConfig config,
                            SuggestionManager suggestionManager,
@@ -136,6 +135,7 @@ public class SuggestionPanel extends JPanel {
         setupButtonContainer();
         suggestedActionPanel.add(buttonContainer, BorderLayout.SOUTH);
 
+
         layeredPane.add(suggestedActionPanel, JLayeredPane.DEFAULT_LAYER);
 
         this.preferencesPanel.setVisible(false);
@@ -149,14 +149,13 @@ public class SuggestionPanel extends JPanel {
         gearButton.setFocusable(true);
         gearButton.setBackground(ColorScheme.DARKER_GRAY_COLOR);
         gearButton.setOpaque(true);
-
-        gearButton.setOpaque(true);
         gearButton.setBounds(5, 5, 20, 20);
         layeredPane.add(gearButton, JLayeredPane.PALETTE_LAYER);
 
         setLayout(new BorderLayout());
         setBackground(ColorScheme.DARKER_GRAY_COLOR);
         setPreferredSize(new Dimension(0, 150));
+
         add(layeredPane);
 
         addComponentListener(new ComponentAdapter() {
@@ -169,12 +168,6 @@ public class SuggestionPanel extends JPanel {
         });
     }
 
-    // FIX: Added the missing method
-    public boolean isCollectItemsSuggested() {
-        return "Collect items".equals(innerSuggestionMessage);
-    }
-
-    //... (all other existing methods: setupButtonContainer, handleGearClick, etc.)
     private void handleGearClick() {
         isPreferencesPanelVisible = !isPreferencesPanelVisible;
         preferencesPanel.setVisible(isPreferencesPanelVisible);
@@ -193,11 +186,11 @@ public class SuggestionPanel extends JPanel {
 
         BufferedImage graphIcon = ImageUtil.loadImageResource(getClass(), "/graph.png");
         graphButton = buildButton(graphIcon, "Price graph", () -> {
+            Suggestion suggestion = suggestionManager.getSuggestion();
+            if (suggestion == null || suggestion.getName() == null) return;
             if(config.priceGraphWebsite().equals(BeagleFlipperConfig.PriceGraphWebsite.BEAGLE_FLIPPER)) {
-                Suggestion suggestion = suggestionManager.getSuggestion();
                 priceGraphController.showPriceGraph( suggestion.getName(),true);
             } else {
-                Suggestion suggestion = suggestionManager.getSuggestion();
                 String url = config.priceGraphWebsite().getUrl(suggestion.getName(), suggestion.getItemId());
                 LinkBrowser.browse(url);
             }
@@ -222,6 +215,7 @@ public class SuggestionPanel extends JPanel {
         buttonContainer.add(centerPanel, BorderLayout.CENTER);
     }
 
+
     private void setItemIcon(int itemId) {
         AsyncBufferedImage image = itemManager.getImage(itemId);
         if (image != null) {
@@ -230,37 +224,53 @@ public class SuggestionPanel extends JPanel {
         }
     }
 
+
     public void updateSuggestion(Suggestion suggestion) {
+        suggestionIcon.setIcon(null);
+        suggestionIcon.setVisible(false);
+        setButtonsVisible(false);
+
         NumberFormat formatter = NumberFormat.getNumberInstance();
         String suggestionString = "<html><center>";
-        suggestionTextContainer.setVisible(false);
 
         switch (suggestion.getType()) {
             case "wait":
                 suggestionString += "Wait <br>";
                 break;
-            case "abort":
-                suggestionString += "Abort offer for<br><FONT COLOR=white>" + suggestion.getName() + "<br></FONT>";
+            case "collect":
+                suggestionString += "Collect items from<br><FONT COLOR=white>" + suggestion.getName() + "</FONT>";
                 setItemIcon(suggestion.getItemId());
+                break;
+            case "abort":
+                suggestionString += "Abort offer for<br><FONT COLOR=white>" + suggestion.getName() + "</FONT>";
+                setItemIcon(suggestion.getItemId());
+                setButtonsVisible(true);
+                break;
+            case "modify": // FIX: Added case for the new "modify" suggestion type.
+                suggestionString += "Modify offer for<br><FONT COLOR=white>" + suggestion.getName() + "</FONT>";
+                setItemIcon(suggestion.getItemId());
+                setButtonsVisible(true);
                 break;
             case "buy":
             case "sell":
-                String capitalisedAction = suggestion.getType().equals("buy") ? "Buy" : "Sell";
+                String capitalisedAction = suggestion.getType().substring(0, 1).toUpperCase() + suggestion.getType().substring(1);
                 suggestionString += capitalisedAction +
                         " <FONT COLOR=" + highlightedColor + ">" + formatter.format(suggestion.getQuantity()) + "</FONT><br>" +
                         "<FONT COLOR=white>" + suggestion.getName() + "</FONT><br>" +
                         "for <FONT COLOR=" + highlightedColor + ">" + formatter.format(suggestion.getPrice()) + "</FONT> gp<br>";
                 setItemIcon(suggestion.getItemId());
+                setButtonsVisible(true);
                 break;
             default:
                 suggestionString += "Error processing suggestion<br>";
         }
-        suggestionString += suggestion.getMessage();
-        suggestionString += "</center><html>";
-        innerSuggestionMessage = "";
-        if(!suggestion.getType().equals("wait")) {
-            setButtonsVisible(true);
+
+        if (suggestion.getMessage() != null && !suggestion.getMessage().isEmpty()) {
+            suggestionString += suggestion.getMessage();
         }
+        suggestionString += "</center></html>";
+
+        innerSuggestionMessage = "";
         suggestionText.setText(suggestionString);
         suggestionText.setMaximumSize(new Dimension(suggestionText.getPreferredSize().width, Integer.MAX_VALUE));
         suggestionTextContainer.setVisible(true);
@@ -322,14 +332,19 @@ public class SuggestionPanel extends JPanel {
         suggestionTextContainer.revalidate();
         suggestionTextContainer.repaint();
     }
+
     private class ManageClickListener extends MouseAdapter {
         @Override
         public void mouseClicked(MouseEvent e) {
             String text = suggestionText.getText();
-            if (text.contains("manage")) {
+            if (text != null && text.contains("manage")) {
                 premiumInstanceController.loadAndOpenPremiumInstanceDialog();
             }
         }
+    }
+
+    public boolean isCollectItemsSuggested() {
+        return "Collect items".equals(innerSuggestionMessage);
     }
 
     public void showLoading() {
@@ -356,6 +371,7 @@ public class SuggestionPanel extends JPanel {
     public void displaySuggestion() {
         Suggestion suggestion = suggestionManager.getSuggestion();
         if (suggestion == null) {
+            setMessage("Waiting for a profitable flip...");
             return;
         }
         AccountStatus accountStatus = accountStatusManager.getAccountStatus();
@@ -398,6 +414,7 @@ public class SuggestionPanel extends JPanel {
         if (errorMessage != null) {
             setMessage(errorMessage);
             hideLoading();
+            return;
         }
 
         if(suggestionManager.isSuggestionRequestInProgress()) {
