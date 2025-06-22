@@ -439,6 +439,10 @@ public class StatsPanelV2 extends JPanel {
         } else {
             SESSION_STATS_INDS.forEach(i -> subInfoPanel.getComponent(i).setVisible(false));
         }
+
+        // --- ADDED THESE TWO LINES ---
+        revalidate();
+        repaint();
     }
 
     private boolean selectedDisplayNameOutOfDate(String selectedDisplayName) {
